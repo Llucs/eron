@@ -5,7 +5,7 @@ GRUB_MKRESCUE = grub-mkrescue
 
 # Flags para 32-bit e freestanding
 CFLAGS = -m32 -std=gnu99 -ffreestanding -O2 -Wall -Wextra
-LDFLAGS = -m32 -ffreestanding -O2 -nostdlib -lgcc
+LDFLAGS = -m32 -ffreestanding -O2 -nostdlib -no-pie -lgcc
 ASFLAGS = --32
 
 # Diretorios
