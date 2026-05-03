@@ -28,7 +28,7 @@ LINKER = $(BOOT_DIR)/linker.ld
 # Alvos principais
 .PHONY: all clean iso run
 
-all: eron.bin
+all: iso
 
 eron.bin: $(BOOT_OBJ) $(KERNEL_OBJS)
 	$(CC) -T $(LINKER) -o eron.bin $(LDFLAGS) $(BOOT_OBJ) $(KERNEL_OBJS)
