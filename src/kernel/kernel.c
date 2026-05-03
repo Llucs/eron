@@ -47,7 +47,6 @@ void kernel_main(void) {
         terminal_putentryat(' ', color_header, x, 0);
     }
     
-    char header_text[32];
     // Simples concatenacao manual para evitar dependencias
     terminal_write_centered("ERON OS - " ERON_VERSION, 0, color_header);
 
