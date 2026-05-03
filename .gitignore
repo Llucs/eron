@@ -1,0 +1,12 @@
+# Binarios e Imagens
+*.bin
+*.iso
+
+# Objetos
+*.o
+
+# Diretorios de build
+isodir/
+
+# Configuracoes locais
+.DS_Store
