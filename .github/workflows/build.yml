@@ -1,0 +1,25 @@
+name: Build Eron OS ISO
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Instalar dependências
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential nasm grub-pc-bin xorriso gcc-multilib
+
+      - name: Build do Eron
+        run: |
+          make clean || true
+          make
+
+      - name: Listar arquivos gerados
+        run: ls -lah
