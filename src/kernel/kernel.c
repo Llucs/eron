@@ -69,7 +69,7 @@ void kernel_main(void) {
     }
     terminal_putentryat('[', color_status, 2, 24);
     terminal_writestring(" STATUS: ATIVO ");
-    terminal_putentryat(']', color_status, 18, 24);
+    terminal_putentryat(']', color_status, 17, 24);
     
     terminal_writestring("\neron> ");
 
