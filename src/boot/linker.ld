@@ -2,39 +2,49 @@ ENTRY(_start)
 
 PHDRS
 {
-    headers PT_PHDR PHDRS;
-    text PT_LOAD;
+    text PT_LOAD FILEHDR PHDRS;
     data PT_LOAD;
     bss PT_LOAD;
 }
 
 SECTIONS
 {
-    . = 1M;
+    . = 0x00100000;
 
-    .multiboot ALIGN(4K) :
+    .multiboot ALIGN(0x1000) :
     {
         KEEP(*(.multiboot))
     } :text
 
-    .text ALIGN(4K) :
+    .text ALIGN(0x1000) :
     {
-        *(.text*)
+        *(.text)
+        *(.text.*)
     } :text
 
-    .rodata ALIGN(4K) :
+    .rodata ALIGN(0x1000) :
     {
-        *(.rodata*)
+        *(.rodata)
+        *(.rodata.*)
     } :text
 
-    .data ALIGN(4K) :
+    .data ALIGN(0x1000) :
     {
-        *(.data*)
+        *(.data)
+        *(.data.*)
     } :data
 
-    .bss ALIGN(4K) :
+    .bss ALIGN(0x1000) :
     {
         *(COMMON)
-        *(.bss*)
+        *(.bss)
+        *(.bss.*)
     } :bss
+
+    /DISCARD/ :
+    {
+        *(.note.GNU-stack)
+        *(.gnu_debuglink)
+        *(.gnu_debugdata)
+    }
 }
