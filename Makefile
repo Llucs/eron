@@ -28,7 +28,8 @@ LINKER = $(BOOT_DIR)/linker.ld
 # Alvos principais
 .PHONY: all clean iso run
 
-all: eron.bin
+# O alvo padrao agora gera a ISO diretamente
+all: iso
 
 eron.bin: $(BOOT_OBJ) $(KERNEL_OBJS)
 	$(CC) -T $(LINKER) -o eron.bin $(LDFLAGS) $(BOOT_OBJ) $(KERNEL_OBJS)
@@ -43,10 +44,12 @@ eron.bin: $(BOOT_OBJ) $(KERNEL_OBJS)
 iso: eron.iso
 
 eron.iso: eron.bin
+	@echo "Limpando estrutura isodir antiga..."
+	@rm -rf $(ISODIR)
 	@echo "Criando estrutura isodir..."
-	mkdir -p $(ISODIR)/boot/grub
+	@mkdir -p $(ISODIR)/boot/grub
 	@echo "Copiando kernel..."
-	cp eron.bin $(ISODIR)/boot/eron.bin
+	@cp eron.bin $(ISODIR)/boot/eron.bin
 	@echo "Gerando grub.cfg dinamicamente..."
 	@echo 'set timeout=5' > $(ISODIR)/boot/grub/grub.cfg
 	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
@@ -56,13 +59,13 @@ eron.iso: eron.bin
 	@echo '	boot' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	@echo "Executando grub-mkrescue..."
-	$(GRUB_MKRESCUE) -o eron.iso $(ISODIR)
+	@$(GRUB_MKRESCUE) -o eron.iso $(ISODIR)
 	@echo "ISO gerada com sucesso: eron.iso"
 
 clean:
 	@echo "Limpando arquivos de build..."
-	rm -f $(BOOT_OBJ) $(KERNEL_OBJS) eron.bin eron.iso
-	rm -rf $(ISODIR)
+	@rm -f $(BOOT_OBJ) $(KERNEL_OBJS) eron.bin eron.iso
+	@rm -rf $(ISODIR)
 
 run: eron.iso
 	qemu-system-i386 -cdrom eron.iso

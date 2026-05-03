@@ -1,0 +1,36 @@
+name: Build Eron OS ISO
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Instalar dependências
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential grub-pc-bin xorriso gcc-multilib mtools libisoburn-dev
+
+      - name: Build do Eron OS
+        run: |
+          make clean
+          make iso
+
+      - name: Listar arquivos gerados
+        run: ls -lah
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: eron-iso
+          path: eron.iso
+          if-no-files-found: error
