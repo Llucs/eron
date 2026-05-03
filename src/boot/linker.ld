@@ -1,34 +1,32 @@
-/* O ponto de entrada definido no boot.S */
 ENTRY(_start)
 
 SECTIONS
 {
-	/* Começamos em 1MiB, local padrão para kernels multiboot */
-	. = 1M;
+    . = 1M;
 
-	/* Primeiro colocamos o cabeçalho multiboot, pois o bootloader precisa dele no início */
-	.text BLOCK(4K) : ALIGN(4K)
-	{
-		*(.multiboot)
-		*(.text)
-	}
+    .multiboot ALIGN(4K) :
+    {
+        KEEP(*(.multiboot))
+    }
 
-	/* Dados somente leitura */
-	.rodata BLOCK(4K) : ALIGN(4K)
-	{
-		*(.rodata)
-	}
+    .text ALIGN(4K) :
+    {
+        *(.text*)
+    }
 
-	/* Dados lidos/escritos (inicializados) */
-	.data BLOCK(4K) : ALIGN(4K)
-	{
-		*(.data)
-	}
+    .rodata ALIGN(4K) :
+    {
+        *(.rodata*)
+    }
 
-	/* Dados lidos/escritos (não inicializados) e pilha */
-	.bss BLOCK(4K) : ALIGN(4K)
-	{
-		*(COMMON)
-		*(.bss)
-	}
+    .data ALIGN(4K) :
+    {
+        *(.data*)
+    }
+
+    .bss ALIGN(4K) :
+    {
+        *(COMMON)
+        *(.bss*)
+    }
 }
