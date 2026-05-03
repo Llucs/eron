@@ -10,14 +10,10 @@ PHDRS
 SECTIONS
 {
     . = 0x00100000;
-
-    .multiboot ALIGN(0x1000) :
-    {
-        KEEP(*(.multiboot))
-    } :text
-
+    
     .text ALIGN(0x1000) :
     {
+        KEEP(*(.multiboot))
         *(.text)
         *(.text.*)
     } :text
