@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "../include/vga.h"
+#include "../include/config.h"
 
 extern void terminal_writestring(const char* data);
 extern void terminal_putchar(char c);
@@ -28,9 +29,9 @@ void execute_command(char* cmd) {
         uint8_t color_header = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLUE);
         uint8_t color_accent = vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK);
         draw_box(2, 2, 76, 20, color_accent);
-        terminal_write_centered("ERON OS - v0.1.0", 0, color_header);
+        terminal_write_centered("ERON OS - " ERON_VERSION, 0, color_header);
     } else if (strcmp(cmd, "info") == 0) {
-        terminal_writestring("\nEron OS v0.1.0\nFocado em interatividade.\nAutor: Llucs");
+        terminal_writestring("\nEron OS " ERON_VERSION "\nAutor: " ERON_AUTHOR);
     } else if (cmd[0] != '\0') {
         terminal_writestring("\nComando desconhecido.");
     }
