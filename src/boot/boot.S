@@ -26,6 +26,7 @@ stack_top:
 _start:
 	# Configura o ponteiro de pilha
 	movl $stack_top, %esp
+	andl $-16, %esp
 
 	# Chama a função principal do kernel (em C)
 	call kernel_main
