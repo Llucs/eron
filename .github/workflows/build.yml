@@ -23,3 +23,9 @@ jobs:
 
       - name: Listar arquivos gerados
         run: ls -lah
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: eron-iso
+          path: "*.iso"
