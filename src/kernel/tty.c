@@ -12,7 +12,6 @@ static size_t terminal_column;
 static uint8_t terminal_color;
 static uint16_t* terminal_buffer;
 
-/* Limpa uma linha específica */
 void terminal_clear_row(size_t y) {
     for (size_t x = 0; x < VGA_WIDTH; x++) {
         const size_t index = y * VGA_WIDTH + x;
@@ -20,21 +19,19 @@ void terminal_clear_row(size_t y) {
     }
 }
 
-/* Move todo o conteúdo para cima (Scroll) */
 void terminal_scroll() {
-    for (size_t y = 3; y < 21; y++) { // Área interna da caixa (2 a 22)
+    for (size_t y = 3; y < 21; y++) {
         for (size_t x = 3; x < 77; x++) {
             terminal_buffer[y * VGA_WIDTH + x] = terminal_buffer[(y + 1) * VGA_WIDTH + x];
         }
     }
-    // Limpa a última linha da área de texto
     for (size_t x = 3; x < 77; x++) {
         terminal_buffer[21 * VGA_WIDTH + x] = vga_entry(' ', terminal_color);
     }
 }
 
 void terminal_initialize(void) {
-	terminal_row = 10; // Começa dentro da caixa
+	terminal_row = 10;
 	terminal_column = 5;
 	terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
 	terminal_buffer = VGA_MEMORY;
