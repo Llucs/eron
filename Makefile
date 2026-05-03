@@ -1,20 +1,33 @@
-# Compiladores
+# Compiladores e Ferramentas
 CC = gcc
 AS = as
+GRUB_MKRESCUE = grub-mkrescue
+
 # Flags para 32-bit e freestanding
 CFLAGS = -m32 -std=gnu99 -ffreestanding -O2 -Wall -Wextra
 LDFLAGS = -m32 -ffreestanding -O2 -nostdlib -lgcc
 ASFLAGS = --32
 
-# Arquivos
-BOOT_OBJ = src/boot/boot.o
-KERNEL_OBJS = src/kernel/kernel.o \
-              src/kernel/tty.o \
-              src/kernel/idt.o \
-              src/kernel/teclado.o \
-              src/kernel/shell.o
+# Diretorios
+SRC_DIR = src
+BOOT_DIR = $(SRC_DIR)/boot
+KERNEL_DIR = $(SRC_DIR)/kernel
+INCLUDE_DIR = $(SRC_DIR)/include
+ISODIR = isodir
 
-LINKER = src/boot/linker.ld
+# Arquivos
+BOOT_OBJ = $(BOOT_DIR)/boot.o
+KERNEL_OBJS = $(KERNEL_DIR)/kernel.o \
+              $(KERNEL_DIR)/tty.o \
+              $(KERNEL_DIR)/idt.o \
+              $(KERNEL_DIR)/teclado.o \
+              $(KERNEL_DIR)/shell.o
+
+LINKER = $(BOOT_DIR)/linker.ld
+GRUB_CONFIG = $(BOOT_DIR)/grub.cfg
+
+# Alvos principais
+.PHONY: all clean iso run
 
 all: eron.bin
 
@@ -27,14 +40,18 @@ eron.bin: $(BOOT_OBJ) $(KERNEL_OBJS)
 %.o: %.S
 	$(AS) $(ASFLAGS) $< -o $@
 
+# Geracao da ISO bootavel
+iso: eron.iso
+
+eron.iso: eron.bin $(GRUB_CONFIG)
+	mkdir -p $(ISODIR)/boot/grub
+	cp eron.bin $(ISODIR)/boot/eron.bin
+	cp $(GRUB_CONFIG) $(ISODIR)/boot/grub/grub.cfg
+	$(GRUB_MKRESCUE) -o eron.iso $(ISODIR)
+
 clean:
 	rm -f $(BOOT_OBJ) $(KERNEL_OBJS) eron.bin eron.iso
-	rm -rf isodir
+	rm -rf $(ISODIR)
 
-iso: eron.bin
-	mkdir -p isodir/boot/grub
-	cp eron.bin isodir/boot/eron.bin
-	echo 'menuentry "Eron OS v0.1.0" {' > isodir/boot/grub/grub.cfg
-	echo '	multiboot /boot/eron.bin' >> isodir/boot/grub/grub.cfg
-	echo '}' >> isodir/boot/grub/grub.cfg
-	grub-mkrescue -o eron.iso isodir
+run: eron.iso
+	qemu-system-i386 -cdrom eron.iso
