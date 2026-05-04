@@ -1,44 +1,50 @@
 #include "../include/syscall.h"
+#include "../include/process.h"
 #include "../include/mm.h"
 #include "../include/timer.h"
 #include "../include/idt.h"
 
 extern void terminal_writestring(const char* data);
-
 extern void syscall_handler_asm(void);
 
-struct regs {
-    uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;
-};
-
-void syscall_dispatch(struct regs* r) {
-    switch (r->eax) {
+void syscall_handle(struct trapframe* tf) {
+    switch (tf->eax) {
     case SYS_WRITE:
-        if (r->ebx == 1 && r->ecx) {
-            terminal_writestring((const char*)r->ecx);
-        }
-        r->eax = 0;
+        if (tf->ebx == 1 && tf->ecx)
+            terminal_writestring((const char*)tf->ecx);
+        tf->eax = 0;
         break;
 
+    case SYS_EXIT:
+        proc_exit((int)tf->ebx);
+        break;
+
+    case SYS_GETPID: {
+        struct process* p = proc_current();
+        tf->eax = p ? p->pid : 0;
+        break;
+    }
+
     case SYS_MALLOC:
-        r->eax = (uint32_t)kmalloc(r->ebx);
+        tf->eax = (uint32_t)kmalloc(tf->ebx);
         break;
 
     case SYS_FREE:
-        kfree((void*)r->ebx);
-        r->eax = 0;
+        kfree((void*)tf->ebx);
+        tf->eax = 0;
         break;
 
     case SYS_TIME:
-        r->eax = timer_seconds();
+        tf->eax = timer_seconds();
         break;
 
-    case SYS_GETPID:
-        r->eax = 0;
+    case SYS_YIELD:
+        tf->eax = 0;
+        proc_yield();
         break;
 
     default:
-        r->eax = (uint32_t)-1;
+        tf->eax = (uint32_t)-1;
         break;
     }
 }

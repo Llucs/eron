@@ -12,9 +12,15 @@
 #define SYS_OPEN    7
 #define SYS_CLOSE   8
 #define SYS_TIME    9
-#define SYS_STAT   10
+#define SYS_YIELD  10
+#define SYS_EXEC   11
+#define SYS_WAIT   12
+#define SYS_STAT   13
 #define SYS_MAX    16
 
+struct trapframe;
+
 void syscall_init(void);
+void syscall_handle(struct trapframe* tf);
 
 #endif

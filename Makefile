@@ -17,6 +17,8 @@ BOOT_OBJ = $(BOOT_DIR)/boot.o
 KERNEL_OBJS = $(KERNEL_DIR)/kernel.o \
               $(KERNEL_DIR)/tty.o \
               $(KERNEL_DIR)/idt.o \
+              $(KERNEL_DIR)/gdt.o \
+              $(KERNEL_DIR)/tss.o \
               $(KERNEL_DIR)/teclado.o \
               $(KERNEL_DIR)/shell.o \
               $(KERNEL_DIR)/mm.o \
@@ -24,7 +26,10 @@ KERNEL_OBJS = $(KERNEL_DIR)/kernel.o \
               $(KERNEL_DIR)/vfs.o \
               $(KERNEL_DIR)/task.o \
               $(KERNEL_DIR)/syscall.o \
-              $(KERNEL_DIR)/display.o
+              $(KERNEL_DIR)/display.o \
+              $(KERNEL_DIR)/process.o \
+              $(KERNEL_DIR)/elf.o \
+              $(KERNEL_DIR)/interrupt.o
 
 LINKER = $(BOOT_DIR)/linker.ld
 
