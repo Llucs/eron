@@ -29,6 +29,8 @@ SECTIONS {
         *(.bss.*)
     }
 
+    _kernel_end = .;
+
     /DISCARD/ : {
         *(.note.gnu.build-id)
         *(.comment)
