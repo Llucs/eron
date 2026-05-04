@@ -4,6 +4,8 @@
 #include "../include/vga.h"
 #include "../include/io.h"
 #include "../include/idt.h"
+#include "../include/gdt.h"
+#include "../include/tss.h"
 #include "../include/teclado.h"
 #include "../include/config.h"
 #include "../include/mm.h"
@@ -11,6 +13,7 @@
 #include "../include/vfs.h"
 #include "../include/task.h"
 #include "../include/syscall.h"
+#include "../include/process.h"
 
 void terminal_initialize(void);
 void terminal_setcolor(uint8_t color);
@@ -19,9 +22,15 @@ void terminal_putchar(char c);
 
 extern void keyboard_handler_asm(void);
 extern void timer_handler_asm(void);
+extern void isr0(void);
+extern void isr6(void);
+extern void isr13(void);
+extern void isr14(void);
 extern uint32_t _kernel_end;
+extern uint32_t stack_top;
 
 void shell_register_programs(void);
+void shell_input(char c);
 void print_prompt(void);
 
 static int proc_cpuinfo_read(char* buf, size_t size);
@@ -64,6 +73,10 @@ static void vfs_populate(void) {
     vfs_mkdev("/dev/kbd0");
     vfs_mkdev("/dev/null");
     vfs_mkdev("/dev/vga0");
+
+    vfs_mkfile("/bin/hello", "[elf32-i386] user-mode hello");
+    vfs_mkfile("/bin/loop",  "[elf32-i386] user-mode loop test");
+    vfs_mkfile("/bin/crash", "[elf32-i386] user-mode fault test");
 }
 
 void kernel_main(void) {
@@ -82,10 +95,15 @@ void kernel_main(void) {
     terminal_setcolor(grey);
     terminal_writestring(" (c) " ERON_AUTHOR "\n\n");
 
-    boot_log("Kernel loaded at 0x100000");
+    gdt_init();
+    boot_log("GDT: kernel/user segments loaded");
 
     idt_install();
-    idt_set_gate(32, (uint32_t)timer_handler_asm, 0x08, 0x8E);
+    idt_set_gate(0,  (uint32_t)isr0,  0x08, 0x8E);
+    idt_set_gate(6,  (uint32_t)isr6,  0x08, 0x8E);
+    idt_set_gate(13, (uint32_t)isr13, 0x08, 0x8E);
+    idt_set_gate(14, (uint32_t)isr14, 0x08, 0x8E);
+    idt_set_gate(32, (uint32_t)timer_handler_asm,    0x08, 0x8E);
     idt_set_gate(33, (uint32_t)keyboard_handler_asm, 0x08, 0x8E);
     boot_log("IDT: 256 interrupt gates");
 
@@ -101,6 +119,9 @@ void kernel_main(void) {
     outb(0xA1, 0xFF);
     boot_log("PIC: remapped to INT 32-47");
 
+    tss_init(0x10, (uint32_t)&stack_top);
+    boot_log("TSS: ring transition ready");
+
     timer_init(PIT_FREQ);
     boot_log("PIT: timer at 100 Hz");
 
@@ -114,6 +135,9 @@ void kernel_main(void) {
     vfs_init();
     vfs_populate();
     boot_log("VFS: filesystem mounted");
+
+    proc_init();
+    boot_log("Process: scheduler initialized");
 
     programs_init();
     shell_register_programs();
@@ -140,7 +164,17 @@ void kernel_main(void) {
     print_prompt();
 
     while (true) {
-        asm volatile("hlt");
+        char c;
+        while ((c = keyboard_getchar()) != 0)
+            shell_input(c);
+
+        struct process* pt = proc_table_ptr();
+        for (int i = 1; i < PROC_MAX; i++) {
+            if (pt[i].state == PROC_ZOMBIE)
+                pt[i].state = PROC_UNUSED;
+        }
+
+        asm volatile("sti; hlt");
     }
 }
 

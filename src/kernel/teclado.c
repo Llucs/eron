@@ -4,10 +4,14 @@
 #include <stdint.h>
 
 extern void terminal_putchar(char c);
-extern void shell_input(char c);
 
 static bool shift_pressed = false;
 static bool caps_lock = false;
+
+#define KB_BUF_SZ 64
+static volatile char kb_buf[KB_BUF_SZ];
+static volatile int  kb_head = 0;
+static volatile int  kb_tail = 0;
 
 static unsigned char kbdus_lower[128] = {
     0,  27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
@@ -39,50 +43,47 @@ static unsigned char kbdus_upper[128] = {
     0, 0
 };
 
-void teclado_handler(void) {
+void keyboard_irq(void) {
     uint8_t scancode = inb(0x60);
 
     if (scancode == 0x2A || scancode == 0x36) {
         shift_pressed = true;
-        outb(0x20, 0x20);
         return;
     }
     if (scancode == 0xAA || scancode == 0xB6) {
         shift_pressed = false;
-        outb(0x20, 0x20);
         return;
     }
-
     if (scancode == 0x3A) {
         caps_lock = !caps_lock;
-        outb(0x20, 0x20);
         return;
     }
 
     if (!(scancode & 0x80)) {
         char c;
         bool use_upper = shift_pressed;
-
-        if (scancode >= 0x10 && scancode <= 0x32) {
+        if (scancode >= 0x10 && scancode <= 0x32)
             if (caps_lock) use_upper = !use_upper;
-        }
 
-        if (use_upper)
-            c = kbdus_upper[scancode];
-        else
-            c = kbdus_lower[scancode];
+        if (use_upper) c = kbdus_upper[scancode];
+        else           c = kbdus_lower[scancode];
 
         if (c != 0) {
-            if (c == '\n' || c == '\b') {
-                shell_input(c);
-            } else {
+            if (c != '\n' && c != '\b')
                 terminal_putchar(c);
-                shell_input(c);
+
+            int next = (kb_head + 1) % KB_BUF_SZ;
+            if (next != kb_tail) {
+                kb_buf[kb_head] = c;
+                kb_head = next;
             }
         }
     }
-    outb(0x20, 0x20);
 }
 
-void teclado_install(void) {
+char keyboard_getchar(void) {
+    if (kb_head == kb_tail) return 0;
+    char c = kb_buf[kb_tail];
+    kb_tail = (kb_tail + 1) % KB_BUF_SZ;
+    return c;
 }

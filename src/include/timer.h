@@ -3,8 +3,10 @@
 
 #include <stdint.h>
 
+struct trapframe;
+
 void timer_init(uint32_t freq);
-void timer_handler(void);
+void timer_tick(struct trapframe* tf);
 uint32_t timer_ticks(void);
 uint32_t timer_seconds(void);
 uint32_t timer_uptime_hours(void);

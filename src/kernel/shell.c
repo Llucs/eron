@@ -9,6 +9,9 @@
 #include "../include/mm.h"
 #include "../include/timer.h"
 #include "../include/display.h"
+#include "../include/process.h"
+#include "../include/syscall.h"
+#include "../include/elf.h"
 
 extern void terminal_writestring(const char* data);
 extern void terminal_putchar(char c);
@@ -22,6 +25,14 @@ static int cmd_index = 0;
 static int str_cmp(const char* a, const char* b) {
     while (*a && (*a == *b)) { a++; b++; }
     return *(unsigned char*)a - *(unsigned char*)b;
+}
+
+static int str_ncmp(const char* a, const char* b, int n) {
+    for (int i = 0; i < n; i++) {
+        if (a[i] != b[i]) return (unsigned char)a[i] - (unsigned char)b[i];
+        if (a[i] == '\0') return 0;
+    }
+    return 0;
 }
 
 static size_t str_len(const char* s) {
@@ -75,6 +86,42 @@ void print_prompt(void) {
     terminal_writestring(":/# ");
 }
 
+/* ── embedded user-mode programs ──────────────────────────── */
+
+static void __attribute__((used)) user_hello(void) {
+    asm volatile(
+        "mov $1, %%eax\n"
+        "mov $1, %%ebx\n"
+        "lea 1f, %%ecx\n"
+        "int $0x80\n"
+        "mov $3, %%eax\n"
+        "xor %%ebx, %%ebx\n"
+        "int $0x80\n"
+        "jmp .\n"
+        "1: .asciz \"Hello from user mode! (ring 3)\\n\"\n"
+        ::: "eax", "ebx", "ecx", "memory"
+    );
+}
+
+static void __attribute__((used)) user_loop(void) {
+    asm volatile(
+        "mov $1, %%eax\n"
+        "mov $1, %%ebx\n"
+        "lea 1f, %%ecx\n"
+        "int $0x80\n"
+        "mov $3, %%eax\n"
+        "xor %%ebx, %%ebx\n"
+        "int $0x80\n"
+        "jmp .\n"
+        "1: .asciz \"Loop finished (preempted and exited)\\n\"\n"
+        ::: "eax", "ebx", "ecx", "memory"
+    );
+}
+
+static void __attribute__((used)) user_crash(void) {
+    asm volatile("cli");
+}
+
 /* ── registered programs ──────────────────────────────────── */
 
 static int prog_help(int argc, char* argv[]) {
@@ -115,13 +162,13 @@ static int prog_about(int argc, char* argv[]) {
 
     uint8_t label = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
     uint8_t val = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    uint8_t dim = vga_entry_color(VGA_COLOR_DARK_GREY, VGA_COLOR_BLACK);
+    uint8_t dim_c = vga_entry_color(VGA_COLOR_DARK_GREY, VGA_COLOR_BLACK);
 
     terminal_setcolor(label);
     terminal_writestring("\nEron OS ");
     terminal_setcolor(val);
     terminal_writestring(ERON_VERSION " (" ERON_CODENAME ")\n");
-    terminal_setcolor(dim);
+    terminal_setcolor(dim_c);
     terminal_writestring("─────────────────────────────\n");
 
     terminal_setcolor(label);
@@ -167,17 +214,17 @@ static int prog_about(int argc, char* argv[]) {
     terminal_writestring("VGA 80x25\n");
 
     terminal_setcolor(label);
-    terminal_writestring(" Programs  ");
+    terminal_writestring(" Processes ");
     terminal_setcolor(val);
-    print_num((uint32_t)program_count());
-    terminal_writestring(" registered\n");
+    print_num((uint32_t)proc_active_count());
+    terminal_writestring(" active\n");
 
     terminal_setcolor(label);
     terminal_writestring(" Syscall   ");
     terminal_setcolor(val);
     terminal_writestring("INT 0x80\n");
 
-    terminal_setcolor(dim);
+    terminal_setcolor(dim_c);
     terminal_writestring(" Author    " ERON_AUTHOR);
 
     return 0;
@@ -283,10 +330,21 @@ static int prog_ps(int argc, char* argv[]) {
     terminal_setcolor(hl);
     terminal_writestring("\n PID  STATE    NAME\n");
     terminal_setcolor(body);
-    terminal_writestring("   0  active   kernel\n");
-    terminal_writestring("   1  active   timer\n");
-    terminal_writestring("   2  active   keyboard\n");
-    terminal_writestring("   3  wait     " ERON_SHELL);
+
+    struct process* pt = proc_table_ptr();
+    for (int i = 0; i < PROC_MAX; i++) {
+        if (pt[i].state == PROC_UNUSED) continue;
+        terminal_writestring("   ");
+        print_num(pt[i].pid);
+        switch (pt[i].state) {
+        case PROC_RUNNING: terminal_writestring("  run      "); break;
+        case PROC_READY:   terminal_writestring("  ready    "); break;
+        case PROC_ZOMBIE:  terminal_writestring("  zombie   "); break;
+        default:           terminal_writestring("  ?        "); break;
+        }
+        terminal_writestring(pt[i].name);
+        terminal_writestring("\n");
+    }
     return 0;
 }
 
@@ -309,13 +367,20 @@ static int prog_ls(int argc, char* argv[]) {
     uint8_t dir_c = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
     uint8_t file_c = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     uint8_t dev_c = vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK);
+    uint8_t exec_c = vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
 
     terminal_writestring("\n");
     for (int i = 0; i < count; i++) {
         const char* name = vfs_basename(entries[i]->path);
-        if (entries[i]->type == VFS_DIR) terminal_setcolor(dir_c);
-        else if (entries[i]->type == VFS_DEV) terminal_setcolor(dev_c);
-        else terminal_setcolor(file_c);
+        if (entries[i]->type == VFS_DIR) {
+            terminal_setcolor(dir_c);
+        } else if (entries[i]->type == VFS_DEV) {
+            terminal_setcolor(dev_c);
+        } else if (str_ncmp(entries[i]->path, "/bin/", 5) == 0) {
+            terminal_setcolor(exec_c);
+        } else {
+            terminal_setcolor(file_c);
+        }
         terminal_writestring(name);
         if (entries[i]->type == VFS_DIR) terminal_writestring("/");
         terminal_writestring("  ");
@@ -480,7 +545,6 @@ static int prog_display(int argc, char* argv[]) {
     print_num(info.bpp);
     terminal_writestring(" bpp\n");
     terminal_writestring(" Buffer    0x");
-    /* simple hex print */
     {
         uint32_t v = info.framebuffer;
         const char hex[] = "0123456789ABCDEF";
@@ -489,6 +553,73 @@ static int prog_display(int argc, char* argv[]) {
         h[8] = '\0';
         terminal_writestring(h);
     }
+    return 0;
+}
+
+/* ── exec: spawn user-mode process ────────────────────────── */
+
+static int prog_exec(int argc, char* argv[]) {
+    if (argc < 2) {
+        uint8_t err = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        terminal_setcolor(err);
+        terminal_writestring("\nexec: usage: exec <program>");
+        return 1;
+    }
+
+    uint32_t entry = 0;
+    const char* name = vfs_basename(argv[1]);
+
+    if (str_cmp(argv[1], "/bin/hello") == 0 || str_cmp(argv[1], "hello") == 0) {
+        entry = (uint32_t)user_hello;
+        name = "hello";
+    } else if (str_cmp(argv[1], "/bin/loop") == 0 || str_cmp(argv[1], "loop") == 0) {
+        entry = (uint32_t)user_loop;
+        name = "loop";
+    } else if (str_cmp(argv[1], "/bin/crash") == 0 || str_cmp(argv[1], "crash") == 0) {
+        entry = (uint32_t)user_crash;
+        name = "crash";
+    } else {
+        char buf[4096];
+        int len = vfs_read(argv[1], buf, sizeof(buf));
+        if (len > 0) {
+            entry = elf_load((const uint8_t*)buf, (uint32_t)len);
+        }
+        if (entry == 0) {
+            uint8_t err = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+            terminal_setcolor(err);
+            terminal_writestring("\nexec: ");
+            terminal_writestring(argv[1]);
+            terminal_writestring(": not executable");
+            return 1;
+        }
+    }
+
+    terminal_writestring("\n");
+
+    int pid = proc_create(name, entry);
+    if (pid < 0) {
+        uint8_t err = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        terminal_setcolor(err);
+        terminal_writestring("exec: process table full");
+        return 1;
+    }
+
+    struct process* pt = proc_table_ptr();
+    struct process* child = NULL;
+    for (int i = 0; i < PROC_MAX; i++) {
+        if (pt[i].pid == (uint32_t)pid) {
+            child = &pt[i];
+            break;
+        }
+    }
+    if (!child) return 1;
+
+    while (child->state == PROC_READY || child->state == PROC_RUNNING) {
+        asm volatile("sti");
+        schedule();
+    }
+
+    child->state = PROC_UNUSED;
     return 0;
 }
 
@@ -512,6 +643,7 @@ void shell_register_programs(void) {
     program_register("ps",      "process list",           prog_ps);
     program_register("id",      "user/group info",        prog_id);
     program_register("arch",    "architecture",           prog_arch);
+    program_register("exec",    "run user program",       prog_exec);
     program_register("display", "display info",           prog_display);
     program_register("memtest", "test heap allocator",    prog_malloc_test);
     program_register("reboot",  "restart system",         prog_reboot);
@@ -544,7 +676,6 @@ void execute_command(char* cmd) {
         return;
     }
 
-    /* parse command into argc/argv */
     char* argv[16];
     int argc = parse_args(cmd, argv, 16);
     if (argc == 0) {
@@ -552,14 +683,12 @@ void execute_command(char* cmd) {
         return;
     }
 
-    /* handle clear specially to avoid extra newline */
     if (str_cmp(argv[0], "clear") == 0) {
         prog_clear(argc, argv);
         print_prompt();
         return;
     }
 
-    /* look up registered program */
     struct program* prog = program_find(argv[0]);
     if (prog) {
         prog->entry(argc, argv);
