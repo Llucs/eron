@@ -1,6 +1,10 @@
 name: Build Eron OS ISO
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -8,18 +12,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout do código
+      - name: Checkout do codigo
         uses: actions/checkout@v4
 
-      - name: Instalar dependências
+      - name: Instalar dependencias
         run: |
           sudo apt update
           sudo apt install -y \
             build-essential \
-            nasm \
-            grub-pc-bin \
-            xorriso \
             gcc-multilib \
+            grub-pc-bin \
+            grub-common \
+            xorriso \
             mtools
 
       - name: Build do Eron
@@ -27,8 +31,10 @@ jobs:
           make clean || true
           make
 
-      - name: Listar arquivos gerados
-        run: ls -lah
+      - name: Verificar binario
+        run: |
+          file eron.bin
+          ls -lah eron.iso
 
       - name: Upload ISO
         uses: actions/upload-artifact@v4
