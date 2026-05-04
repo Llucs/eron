@@ -4,237 +4,579 @@
 #include "../include/vga.h"
 #include "../include/config.h"
 #include "../include/io.h"
+#include "../include/task.h"
+#include "../include/vfs.h"
+#include "../include/mm.h"
+#include "../include/timer.h"
+#include "../include/display.h"
 
 extern void terminal_writestring(const char* data);
 extern void terminal_putchar(char c);
 extern void terminal_setcolor(uint8_t color);
-extern void terminal_setpos(size_t x, size_t y);
-extern void terminal_clear_content(void);
-extern void draw_box(size_t x, size_t y, size_t width, size_t height, uint8_t color);
-extern void terminal_write_centered(const char* text, size_t row, uint8_t color);
-extern void terminal_write_at(const char* text, size_t x, size_t y, uint8_t color);
-extern void terminal_putentryat(char c, uint8_t color, size_t x, size_t y);
-extern void draw_header(void);
-extern void draw_status_bar(void);
-extern void terminal_initialize(void);
+extern void terminal_clear(void);
+extern const char* vfs_basename(const char* path);
 
 static char cmd_buffer[128];
 static int cmd_index = 0;
 
-static int strcmp(const char* s1, const char* s2) {
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-    }
-    return *(unsigned char*)s1 - *(unsigned char*)s2;
+static int str_cmp(const char* a, const char* b) {
+    while (*a && (*a == *b)) { a++; b++; }
+    return *(unsigned char*)a - *(unsigned char*)b;
 }
 
-static int strncmp(const char* s1, const char* s2, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        if (s1[i] != s2[i] || s1[i] == '\0')
-            return (unsigned char)s1[i] - (unsigned char)s2[i];
+static size_t str_len(const char* s) {
+    size_t n = 0;
+    while (s[n]) n++;
+    return n;
+}
+
+static void uint_to_str(uint32_t val, char* buf) {
+    if (val == 0) { buf[0] = '0'; buf[1] = '\0'; return; }
+    char tmp[12];
+    int i = 0;
+    while (val > 0) { tmp[i++] = '0' + (val % 10); val /= 10; }
+    for (int j = 0; j < i; j++) buf[j] = tmp[i - 1 - j];
+    buf[i] = '\0';
+}
+
+static void print_num(uint32_t val) {
+    char buf[12];
+    uint_to_str(val, buf);
+    terminal_writestring(buf);
+}
+
+static void print_num_padded(uint32_t val, int width) {
+    char buf[12];
+    uint_to_str(val, buf);
+    int len = (int)str_len(buf);
+    for (int i = 0; i < width - len; i++)
+        terminal_writestring(" ");
+    terminal_writestring(buf);
+}
+
+static uint8_t read_cmos(uint8_t reg) {
+    outb(0x70, reg);
+    return inb(0x71);
+}
+
+static uint8_t bcd_to_bin(uint8_t bcd) {
+    return ((bcd >> 4) * 10) + (bcd & 0x0F);
+}
+
+/* ── prompt ───────────────────────────────────────────────── */
+
+void print_prompt(void) {
+    uint8_t name_c = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
+    uint8_t body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    terminal_setcolor(name_c);
+    terminal_writestring("eron");
+    terminal_setcolor(body);
+    terminal_writestring(":/# ");
+}
+
+/* ── registered programs ──────────────────────────────────── */
+
+static int prog_help(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    uint8_t hl = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    uint8_t cmd_c = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
+    uint8_t body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    terminal_setcolor(hl);
+    terminal_writestring("\nEron Shell (" ERON_SHELL " " ERON_SHELL_VER ")\n\n");
+
+    struct program* table = program_table();
+    int count = program_count();
+
+    for (int i = 0; i < count; i++) {
+        if (!table[i].active) continue;
+        terminal_setcolor(cmd_c);
+        terminal_writestring(" ");
+        terminal_writestring(table[i].name);
+        int pad = 14 - (int)str_len(table[i].name);
+        terminal_setcolor(body);
+        for (int j = 0; j < pad; j++) terminal_writestring(" ");
+        terminal_writestring(table[i].desc);
+        terminal_writestring("\n");
     }
     return 0;
 }
 
-static void print_prompt(void) {
-    uint8_t prompt_color = vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
-    uint8_t body_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    terminal_setcolor(prompt_color);
-    terminal_writestring("eron");
-    terminal_setcolor(body_color);
-    terminal_writestring("> ");
-}
-
-static void cmd_help(void) {
-    uint8_t title_color = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
-    uint8_t body_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-
-    terminal_setcolor(title_color);
-    terminal_writestring("\n  Comandos disponiveis:");
-    terminal_setcolor(body_color);
-    terminal_writestring("\n  help     - Mostra esta ajuda");
-    terminal_writestring("\n  clear    - Limpa a tela");
-    terminal_writestring("\n  info     - Informacoes do sistema");
-    terminal_writestring("\n  version  - Versao do sistema");
-    terminal_writestring("\n  uptime   - Tempo desde o boot");
-    terminal_writestring("\n  mem      - Informacoes de memoria");
-    terminal_writestring("\n  cpuid    - Informacoes do processador");
-    terminal_writestring("\n  echo     - Repete o texto digitado");
-    terminal_writestring("\n  reboot   - Reinicia o sistema");
-    terminal_writestring("\n  halt     - Desliga o sistema");
-}
-
-static void cmd_info(void) {
-    uint8_t title_color = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
-    uint8_t body_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-
-    terminal_setcolor(title_color);
-    terminal_writestring("\n  Eron OS - Informacoes");
-    terminal_setcolor(body_color);
-    terminal_writestring("\n  Versao:  " ERON_VERSION);
-    terminal_writestring("\n  Autor:   " ERON_AUTHOR);
-    terminal_writestring("\n  Arch:    i386 (32-bit)");
-    terminal_writestring("\n  Video:   VGA 80x25 texto");
-    terminal_writestring("\n  Kernel:  Monolitico");
-}
-
-static void cmd_version(void) {
-    terminal_writestring("\n  Eron OS " ERON_VERSION);
-}
-
-static volatile uint32_t tick_count = 0;
-
-void timer_tick(void) {
-    tick_count++;
-}
-
-static void cmd_uptime(void) {
-    terminal_writestring("\n  Sistema ativo desde o boot.");
-    terminal_writestring("\n  (Timer PIT nao configurado)");
-}
-
-static void cmd_mem(void) {
-    uint8_t title_color = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
-    uint8_t body_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-
-    terminal_setcolor(title_color);
-    terminal_writestring("\n  Memoria do Sistema");
-    terminal_setcolor(body_color);
-    terminal_writestring("\n  Modo:  Flat (sem paginacao)");
-    terminal_writestring("\n  Stack: 16 KB");
-    terminal_writestring("\n  VGA:   0xB8000 (4000 bytes)");
-    terminal_writestring("\n  Kernel: carregado em 0x100000");
-}
-
-static void cmd_cpuid(void) {
+static int prog_about(int argc, char* argv[]) {
+    (void)argc; (void)argv;
     uint32_t eax, ebx, ecx, edx;
     char vendor[13];
-
-    asm volatile("cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(0));
-
+    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0));
     *((uint32_t*)&vendor[0]) = ebx;
     *((uint32_t*)&vendor[4]) = edx;
     *((uint32_t*)&vendor[8]) = ecx;
     vendor[12] = '\0';
 
-    uint8_t title_color = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
-    uint8_t body_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    uint8_t label = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    uint8_t val = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    uint8_t dim = vga_entry_color(VGA_COLOR_DARK_GREY, VGA_COLOR_BLACK);
 
-    terminal_setcolor(title_color);
-    terminal_writestring("\n  Processador");
-    terminal_setcolor(body_color);
-    terminal_writestring("\n  Vendor: ");
+    terminal_setcolor(label);
+    terminal_writestring("\nEron OS ");
+    terminal_setcolor(val);
+    terminal_writestring(ERON_VERSION " (" ERON_CODENAME ")\n");
+    terminal_setcolor(dim);
+    terminal_writestring("─────────────────────────────\n");
+
+    terminal_setcolor(label);
+    terminal_writestring(" Kernel    ");
+    terminal_setcolor(val);
+    terminal_writestring("eron-i386\n");
+
+    terminal_setcolor(label);
+    terminal_writestring(" Arch      ");
+    terminal_setcolor(val);
+    terminal_writestring("i386 (32-bit)\n");
+
+    terminal_setcolor(label);
+    terminal_writestring(" CPU       ");
+    terminal_setcolor(val);
     terminal_writestring(vendor);
+    terminal_writestring("\n");
 
-    asm volatile("cpuid"
-        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-        : "a"(1));
+    terminal_setcolor(label);
+    terminal_writestring(" Memory    ");
+    terminal_setcolor(val);
+    print_num((uint32_t)(mm_total() / 1024));
+    terminal_writestring(" kB heap (");
+    print_num((uint32_t)(mm_free() / 1024));
+    terminal_writestring(" kB free)\n");
 
-    uint32_t family = (eax >> 8) & 0xF;
-    uint32_t model = (eax >> 4) & 0xF;
-    uint32_t stepping = eax & 0xF;
+    terminal_setcolor(label);
+    terminal_writestring(" Uptime    ");
+    terminal_setcolor(val);
+    print_num(timer_uptime_minutes());
+    terminal_writestring("m ");
+    print_num(timer_uptime_seconds());
+    terminal_writestring("s\n");
 
-    char num_buf[12];
-    terminal_writestring("\n  Family: ");
-    num_buf[0] = '0' + (family / 10);
-    num_buf[1] = '0' + (family % 10);
-    num_buf[2] = '\0';
-    terminal_writestring(num_buf);
+    terminal_setcolor(label);
+    terminal_writestring(" Shell     ");
+    terminal_setcolor(val);
+    terminal_writestring(ERON_SHELL " " ERON_SHELL_VER "\n");
 
-    terminal_writestring("  Model: ");
-    num_buf[0] = '0' + (model / 10);
-    num_buf[1] = '0' + (model % 10);
-    num_buf[2] = '\0';
-    terminal_writestring(num_buf);
+    terminal_setcolor(label);
+    terminal_writestring(" Display   ");
+    terminal_setcolor(val);
+    terminal_writestring("VGA 80x25\n");
 
-    terminal_writestring("  Stepping: ");
-    num_buf[0] = '0' + (stepping / 10);
-    num_buf[1] = '0' + (stepping % 10);
-    num_buf[2] = '\0';
-    terminal_writestring(num_buf);
+    terminal_setcolor(label);
+    terminal_writestring(" Programs  ");
+    terminal_setcolor(val);
+    print_num((uint32_t)program_count());
+    terminal_writestring(" registered\n");
+
+    terminal_setcolor(label);
+    terminal_writestring(" Syscall   ");
+    terminal_setcolor(val);
+    terminal_writestring("INT 0x80\n");
+
+    terminal_setcolor(dim);
+    terminal_writestring(" Author    " ERON_AUTHOR);
+
+    return 0;
 }
 
-static void cmd_echo(const char* args) {
-    terminal_writestring("\n  ");
-    if (args && *args) {
-        terminal_writestring(args);
+static int prog_uname(int argc, char* argv[]) {
+    if (argc > 1 && str_cmp(argv[1], "-a") == 0) {
+        terminal_writestring("\nEron " ERON_HOSTNAME " " ERON_VERSION "-" ERON_CODENAME " i386 EronOS");
+    } else if (argc > 1 && str_cmp(argv[1], "-r") == 0) {
+        terminal_writestring("\n" ERON_VERSION);
+    } else {
+        terminal_writestring("\nEron");
     }
+    return 0;
 }
 
-static void cmd_clear(void) {
-    terminal_initialize();
-    uint8_t color_accent = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
+static int prog_uptime(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    uint32_t h = timer_uptime_hours();
+    uint32_t m = timer_uptime_minutes();
+    uint32_t s = timer_uptime_seconds();
 
-    draw_header();
-    draw_box(2, 2, 76, 20, color_accent);
-    draw_status_bar();
+    terminal_writestring("\nup ");
+    print_num(h);
+    terminal_writestring(":");
+    if (m < 10) terminal_writestring("0");
+    print_num(m);
+    terminal_writestring(":");
+    if (s < 10) terminal_writestring("0");
+    print_num(s);
+    return 0;
+}
 
-    terminal_setpos(3, 3);
+static int prog_date(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    uint8_t sec = bcd_to_bin(read_cmos(0x00));
+    uint8_t min = bcd_to_bin(read_cmos(0x02));
+    uint8_t hour = bcd_to_bin(read_cmos(0x04));
+    uint8_t day = bcd_to_bin(read_cmos(0x07));
+    uint8_t month = bcd_to_bin(read_cmos(0x08));
+    uint8_t year = bcd_to_bin(read_cmos(0x09));
+
+    static const char* months[] = {
+        "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+
+    terminal_writestring("\n");
+    if (month >= 1 && month <= 12) terminal_writestring(months[month]);
+    else terminal_writestring("???");
+    terminal_writestring(" ");
+    if (day < 10) terminal_writestring("0");
+    print_num(day);
+    terminal_writestring(" ");
+    if (hour < 10) terminal_writestring("0");
+    print_num(hour);
+    terminal_writestring(":");
+    if (min < 10) terminal_writestring("0");
+    print_num(min);
+    terminal_writestring(":");
+    if (sec < 10) terminal_writestring("0");
+    print_num(sec);
+    terminal_writestring(" UTC 20");
+    if (year < 10) terminal_writestring("0");
+    print_num(year);
+    return 0;
+}
+
+static int prog_free(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    uint8_t hl = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    uint8_t body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    terminal_setcolor(hl);
+    terminal_writestring("\n            total       used       free\n");
+    terminal_setcolor(body);
+    terminal_writestring("Heap   ");
+    print_num_padded((uint32_t)(mm_total() / 1024), 8);
+    terminal_writestring(" kB ");
+    print_num_padded((uint32_t)(mm_used() / 1024), 8);
+    terminal_writestring(" kB ");
+    print_num_padded((uint32_t)(mm_free() / 1024), 8);
+    terminal_writestring(" kB");
+    return 0;
+}
+
+static int prog_cpuid(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    char buf[256];
+    int len = vfs_read("/proc/cpuinfo", buf, sizeof(buf));
+    if (len > 0) {
+        terminal_writestring("\n");
+        terminal_writestring(buf);
+    }
+    return 0;
+}
+
+static int prog_ps(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    uint8_t hl = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    uint8_t body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    terminal_setcolor(hl);
+    terminal_writestring("\n PID  STATE    NAME\n");
+    terminal_setcolor(body);
+    terminal_writestring("   0  active   kernel\n");
+    terminal_writestring("   1  active   timer\n");
+    terminal_writestring("   2  active   keyboard\n");
+    terminal_writestring("   3  wait     " ERON_SHELL);
+    return 0;
+}
+
+static int prog_ls(int argc, char* argv[]) {
+    const char* dir = "/";
+    if (argc > 1) dir = argv[1];
+
+    struct vfs_node* entries[32];
+    int count = vfs_list(dir, entries, 32);
+
+    if (count <= 0) {
+        uint8_t err = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        terminal_setcolor(err);
+        terminal_writestring("\nls: ");
+        terminal_writestring(dir);
+        terminal_writestring(": not found");
+        return 1;
+    }
+
+    uint8_t dir_c = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
+    uint8_t file_c = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    uint8_t dev_c = vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK);
+
+    terminal_writestring("\n");
+    for (int i = 0; i < count; i++) {
+        const char* name = vfs_basename(entries[i]->path);
+        if (entries[i]->type == VFS_DIR) terminal_setcolor(dir_c);
+        else if (entries[i]->type == VFS_DEV) terminal_setcolor(dev_c);
+        else terminal_setcolor(file_c);
+        terminal_writestring(name);
+        if (entries[i]->type == VFS_DIR) terminal_writestring("/");
+        terminal_writestring("  ");
+    }
+    return 0;
+}
+
+static int prog_cat(int argc, char* argv[]) {
+    if (argc < 2) {
+        uint8_t err = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        terminal_setcolor(err);
+        terminal_writestring("\ncat: missing file argument");
+        return 1;
+    }
+
+    struct vfs_node* node = vfs_lookup(argv[1]);
+    if (!node) {
+        uint8_t err = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        terminal_setcolor(err);
+        terminal_writestring("\ncat: ");
+        terminal_writestring(argv[1]);
+        terminal_writestring(": not found");
+        return 1;
+    }
+    if (node->type == VFS_DIR) {
+        uint8_t err = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        terminal_setcolor(err);
+        terminal_writestring("\ncat: ");
+        terminal_writestring(argv[1]);
+        terminal_writestring(": is a directory");
+        return 1;
+    }
+
+    char buf[512];
+    int len = vfs_read(argv[1], buf, sizeof(buf));
+    if (len >= 0) {
+        terminal_writestring("\n");
+        terminal_writestring(buf);
+    }
+    return 0;
+}
+
+static int prog_echo(int argc, char* argv[]) {
+    terminal_writestring("\n");
+    for (int i = 1; i < argc; i++) {
+        if (i > 1) terminal_writestring(" ");
+        terminal_writestring(argv[i]);
+    }
+    return 0;
+}
+
+static int prog_whoami(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_writestring("\n" ERON_USER);
+    return 0;
+}
+
+static int prog_hostname(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_writestring("\n" ERON_HOSTNAME);
+    return 0;
+}
+
+static int prog_pwd(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_writestring("\n/");
+    return 0;
+}
+
+static int prog_id(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_writestring("\nuid=0(" ERON_USER ") gid=0(" ERON_USER ")");
+    return 0;
+}
+
+static int prog_arch(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_writestring("\ni386");
+    return 0;
+}
+
+static int prog_clear(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_clear();
     terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));
+    return 0;
 }
 
-static void cmd_reboot(void) {
-    terminal_writestring("\n  Reiniciando...");
+static int prog_reboot(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_writestring("\nRestarting...\n");
     uint8_t temp;
     do {
         temp = inb(0x64);
-        if (temp & 1)
-            inb(0x60);
+        if (temp & 1) inb(0x60);
     } while (temp & 2);
     outb(0x64, 0xFE);
     asm volatile("hlt");
+    return 0;
 }
 
-static void cmd_halt(void) {
-    terminal_writestring("\n  Desligando o sistema...");
-    terminal_writestring("\n  Voce pode desligar o computador.");
+static int prog_halt(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_writestring("\nSystem halted.\n");
     asm volatile("cli");
-    for (;;) {
-        asm volatile("hlt");
+    for (;;) asm volatile("hlt");
+    return 0;
+}
+
+static int prog_malloc_test(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    uint8_t hl = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    uint8_t body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    terminal_setcolor(hl);
+    terminal_writestring("\nHeap test:\n");
+    terminal_setcolor(body);
+
+    terminal_writestring(" Before: used=");
+    print_num((uint32_t)mm_used());
+    terminal_writestring(" free=");
+    print_num((uint32_t)mm_free());
+    terminal_writestring("\n");
+
+    void* p1 = kmalloc(64);
+    void* p2 = kmalloc(128);
+    void* p3 = kmalloc(256);
+
+    terminal_writestring(" Allocated 64+128+256 bytes\n");
+    terminal_writestring(" After:  used=");
+    print_num((uint32_t)mm_used());
+    terminal_writestring(" free=");
+    print_num((uint32_t)mm_free());
+    terminal_writestring("\n");
+
+    kfree(p1);
+    kfree(p2);
+    kfree(p3);
+    terminal_writestring(" Freed all blocks");
+    return 0;
+}
+
+static int prog_display(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    struct display_info info;
+    display_get_info(&info);
+
+    uint8_t hl = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    uint8_t body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    terminal_setcolor(hl);
+    terminal_writestring("\nDisplay:\n");
+    terminal_setcolor(body);
+    terminal_writestring(" Mode      ");
+    if (info.mode == DISPLAY_TEXT) terminal_writestring("text\n");
+    else terminal_writestring("framebuffer\n");
+    terminal_writestring(" Size      ");
+    print_num(info.width);
+    terminal_writestring("x");
+    print_num(info.height);
+    terminal_writestring("\n Depth     ");
+    print_num(info.bpp);
+    terminal_writestring(" bpp\n");
+    terminal_writestring(" Buffer    0x");
+    /* simple hex print */
+    {
+        uint32_t v = info.framebuffer;
+        const char hex[] = "0123456789ABCDEF";
+        char h[9];
+        for (int i = 7; i >= 0; i--) { h[i] = hex[v & 0xF]; v >>= 4; }
+        h[8] = '\0';
+        terminal_writestring(h);
     }
+    return 0;
+}
+
+/* ── registration ─────────────────────────────────────────── */
+
+void shell_register_programs(void) {
+    program_register("help",    "show commands",          prog_help);
+    program_register("about",   "system information",     prog_about);
+    program_register("clear",   "clear terminal",         prog_clear);
+    program_register("uname",   "kernel identification",  prog_uname);
+    program_register("uptime",  "system uptime",          prog_uptime);
+    program_register("date",    "current date/time",      prog_date);
+    program_register("free",    "memory usage",           prog_free);
+    program_register("cpuid",   "CPU information",        prog_cpuid);
+    program_register("whoami",  "current user",           prog_whoami);
+    program_register("hostname","system hostname",        prog_hostname);
+    program_register("pwd",     "current directory",      prog_pwd);
+    program_register("ls",      "list files",             prog_ls);
+    program_register("cat",     "read file",              prog_cat);
+    program_register("echo",    "print text",             prog_echo);
+    program_register("ps",      "process list",           prog_ps);
+    program_register("id",      "user/group info",        prog_id);
+    program_register("arch",    "architecture",           prog_arch);
+    program_register("display", "display info",           prog_display);
+    program_register("memtest", "test heap allocator",    prog_malloc_test);
+    program_register("reboot",  "restart system",         prog_reboot);
+    program_register("halt",    "power off",              prog_halt);
+}
+
+/* ── command parsing ──────────────────────────────────────── */
+
+static int parse_args(char* input, char* argv[], int max) {
+    int argc = 0;
+    char* p = input;
+    while (*p && argc < max) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        argv[argc++] = p;
+        while (*p && *p != ' ') p++;
+        if (*p) *p++ = '\0';
+    }
+    return argc;
 }
 
 void execute_command(char* cmd) {
-    uint8_t body_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    uint8_t err_color = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    uint8_t body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    uint8_t err = vga_entry_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
 
-    terminal_setcolor(body_color);
+    terminal_setcolor(body);
 
-    if (strcmp(cmd, "help") == 0) {
-        cmd_help();
-    } else if (strcmp(cmd, "clear") == 0) {
-        cmd_clear();
+    if (cmd[0] == '\0') {
         print_prompt();
         return;
-    } else if (strcmp(cmd, "info") == 0) {
-        cmd_info();
-    } else if (strcmp(cmd, "version") == 0) {
-        cmd_version();
-    } else if (strcmp(cmd, "uptime") == 0) {
-        cmd_uptime();
-    } else if (strcmp(cmd, "mem") == 0) {
-        cmd_mem();
-    } else if (strcmp(cmd, "cpuid") == 0) {
-        cmd_cpuid();
-    } else if (strncmp(cmd, "echo ", 5) == 0) {
-        cmd_echo(cmd + 5);
-    } else if (strcmp(cmd, "echo") == 0) {
-        cmd_echo("");
-    } else if (strcmp(cmd, "reboot") == 0) {
-        cmd_reboot();
-    } else if (strcmp(cmd, "halt") == 0 || strcmp(cmd, "shutdown") == 0) {
-        cmd_halt();
-    } else if (cmd[0] != '\0') {
-        terminal_setcolor(err_color);
-        terminal_writestring("\n  Comando nao encontrado: ");
-        terminal_writestring(cmd);
-        terminal_setcolor(body_color);
-        terminal_writestring("\n  Digite 'help' para ajuda.");
     }
 
+    /* parse command into argc/argv */
+    char* argv[16];
+    int argc = parse_args(cmd, argv, 16);
+    if (argc == 0) {
+        print_prompt();
+        return;
+    }
+
+    /* handle clear specially to avoid extra newline */
+    if (str_cmp(argv[0], "clear") == 0) {
+        prog_clear(argc, argv);
+        print_prompt();
+        return;
+    }
+
+    /* look up registered program */
+    struct program* prog = program_find(argv[0]);
+    if (prog) {
+        prog->entry(argc, argv);
+    } else if (str_cmp(argv[0], "exit") == 0) {
+        terminal_setcolor(err);
+        terminal_writestring("\neron: no parent process");
+    } else if (str_cmp(argv[0], "shutdown") == 0 || str_cmp(argv[0], "poweroff") == 0) {
+        prog_halt(argc, argv);
+        return;
+    } else {
+        terminal_setcolor(err);
+        terminal_writestring("\neron: ");
+        terminal_writestring(argv[0]);
+        terminal_writestring(": not found");
+    }
+
+    terminal_setcolor(body);
     terminal_writestring("\n");
     print_prompt();
 }

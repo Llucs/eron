@@ -6,50 +6,88 @@
 #include "../include/idt.h"
 #include "../include/teclado.h"
 #include "../include/config.h"
+#include "../include/mm.h"
+#include "../include/timer.h"
+#include "../include/vfs.h"
+#include "../include/task.h"
+#include "../include/syscall.h"
 
 void terminal_initialize(void);
 void terminal_setcolor(uint8_t color);
-void terminal_setpos(size_t x, size_t y);
 void terminal_writestring(const char* data);
-void terminal_write_at(const char* text, size_t x, size_t y, uint8_t color);
-void draw_box(size_t x, size_t y, size_t width, size_t height, uint8_t color);
-void terminal_write_centered(const char* text, size_t row, uint8_t color);
-void terminal_putentryat(char c, uint8_t color, size_t x, size_t y);
+void terminal_putchar(char c);
 
 extern void keyboard_handler_asm(void);
+extern void timer_handler_asm(void);
+extern uint32_t _kernel_end;
 
-void draw_header(void) {
-    uint8_t color_header = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLUE);
-    for (size_t x = 0; x < 80; x++) {
-        terminal_putentryat(' ', color_header, x, 0);
-        terminal_putentryat(' ', color_header, x, 1);
-    }
-    terminal_write_centered("ERON OS - " ERON_VERSION, 0, color_header);
-    terminal_write_centered("Sistema Operacional Educacional", 1, color_header);
+void shell_register_programs(void);
+void print_prompt(void);
+
+static int proc_cpuinfo_read(char* buf, size_t size);
+static int proc_meminfo_read(char* buf, size_t size);
+static int proc_uptime_read(char* buf, size_t size);
+
+static void boot_log(const char* msg) {
+    uint8_t arrow = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
+    uint8_t txt = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    terminal_setcolor(arrow);
+    terminal_writestring(" >> ");
+    terminal_setcolor(txt);
+    terminal_writestring(msg);
+    terminal_writestring("\n");
 }
 
-void draw_status_bar(void) {
-    uint8_t color_status = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_GREEN);
-    for (size_t x = 0; x < 80; x++) {
-        terminal_putentryat(' ', color_status, x, 24);
-    }
-    terminal_write_at("[ STATUS: ATIVO ]", 2, 24, color_status);
-    terminal_write_at("Mem: 128MB", 60, 24, color_status);
-}
+static void vfs_populate(void) {
+    vfs_mkdir("/");
+    vfs_mkdir("/bin");
+    vfs_mkdir("/dev");
+    vfs_mkdir("/etc");
+    vfs_mkdir("/home");
+    vfs_mkdir("/proc");
+    vfs_mkdir("/tmp");
+    vfs_mkdir("/var");
 
-void draw_ui(void) {
-    uint8_t color_accent = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
+    vfs_mkfile("/etc/hostname", ERON_HOSTNAME);
+    vfs_mkfile("/etc/version", "Eron OS " ERON_VERSION " (" ERON_CODENAME ")");
+    vfs_mkfile("/etc/motd", "Welcome to Eron OS.\nType 'help' for commands.");
+    vfs_mkfile("/etc/os-release",
+        "NAME=EronOS\nVERSION=" ERON_VERSION "\nCODENAME=" ERON_CODENAME
+        "\nARCH=i386\nAUTHOR=" ERON_AUTHOR);
 
-    draw_header();
-    draw_box(2, 2, 76, 20, color_accent);
-    draw_status_bar();
+    vfs_mkproc("/proc/cpuinfo", proc_cpuinfo_read);
+    vfs_mkproc("/proc/meminfo", proc_meminfo_read);
+    vfs_mkproc("/proc/uptime", proc_uptime_read);
+    vfs_mkfile("/proc/version", "Eron " ERON_VERSION " (i386)");
+
+    vfs_mkdev("/dev/tty0");
+    vfs_mkdev("/dev/kbd0");
+    vfs_mkdev("/dev/null");
+    vfs_mkdev("/dev/vga0");
 }
 
 void kernel_main(void) {
     terminal_initialize();
 
+    uint8_t white = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    uint8_t grey = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    uint8_t dim = vga_entry_color(VGA_COLOR_DARK_GREY, VGA_COLOR_BLACK);
+
+    terminal_setcolor(white);
+    terminal_writestring("\n Eron OS ");
+    terminal_setcolor(grey);
+    terminal_writestring(ERON_VERSION);
+    terminal_setcolor(dim);
+    terminal_writestring(" (" ERON_CODENAME ")\n");
+    terminal_setcolor(grey);
+    terminal_writestring(" (c) " ERON_AUTHOR "\n\n");
+
+    boot_log("Kernel loaded at 0x100000");
+
     idt_install();
+    idt_set_gate(32, (uint32_t)timer_handler_asm, 0x08, 0x8E);
     idt_set_gate(33, (uint32_t)keyboard_handler_asm, 0x08, 0x8E);
+    boot_log("IDT: 256 interrupt gates");
 
     outb(0x20, 0x11);
     outb(0xA0, 0x11);
@@ -59,33 +97,114 @@ void kernel_main(void) {
     outb(0xA1, 0x02);
     outb(0x21, 0x01);
     outb(0xA1, 0x01);
-    outb(0x21, 0xFD);
+    outb(0x21, 0xFC);
     outb(0xA1, 0xFF);
+    boot_log("PIC: remapped to INT 32-47");
+
+    timer_init(PIT_FREQ);
+    boot_log("PIT: timer at 100 Hz");
 
     asm volatile("sti");
+    boot_log("PS/2: keyboard ready");
+    boot_log("VGA: 80x25 text mode");
 
-    uint8_t color_body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    uint8_t color_accent = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
-    uint8_t color_highlight = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    mm_init((uint32_t)&_kernel_end, HEAP_SIZE);
+    boot_log("Memory: 1 MB heap initialized");
 
-    draw_ui();
+    vfs_init();
+    vfs_populate();
+    boot_log("VFS: filesystem mounted");
 
-    terminal_write_centered("Eron OS", 5, color_highlight);
-    terminal_write_centered("Desenvolvido por " ERON_AUTHOR, 7, color_body);
+    programs_init();
+    shell_register_programs();
 
-    terminal_write_at("> Kernel carregado com sucesso", 4, 10, color_accent);
-    terminal_write_at("> Modo VGA 80x25 ativo", 4, 12, color_accent);
-    terminal_write_at("> IDT e PIC configurados", 4, 13, color_accent);
-    terminal_write_at("> Teclado PS/2 ativo", 4, 14, color_accent);
-    terminal_write_at("> Sistema pronto", 4, 16, color_highlight);
+    char prog_msg[32] = "Programs: ";
+    int pc = program_count();
+    prog_msg[10] = '0' + (pc / 10);
+    prog_msg[11] = '0' + (pc % 10);
+    prog_msg[12] = ' ';
+    prog_msg[13] = 'r'; prog_msg[14] = 'e'; prog_msg[15] = 'g';
+    prog_msg[16] = 'i'; prog_msg[17] = 's'; prog_msg[18] = 't';
+    prog_msg[19] = 'e'; prog_msg[20] = 'r'; prog_msg[21] = 'e';
+    prog_msg[22] = 'd'; prog_msg[23] = '\0';
+    boot_log(prog_msg);
 
-    terminal_write_at("Digite 'help' para ver os comandos disponiveis.", 4, 18, color_body);
+    syscall_init();
+    boot_log("Syscall: INT 0x80 handler active");
 
-    terminal_setpos(3, 20);
-    terminal_setcolor(color_body);
-    terminal_writestring("eron> ");
+    terminal_writestring("\n");
+    terminal_setcolor(white);
+    terminal_writestring(" System ready.\n\n");
+    terminal_setcolor(grey);
+
+    print_prompt();
 
     while (true) {
         asm volatile("hlt");
     }
+}
+
+/* /proc dynamic readers */
+
+static void str_append(char* buf, size_t* pos, size_t max, const char* s) {
+    while (*s && *pos < max - 1) buf[(*pos)++] = *s++;
+    buf[*pos] = '\0';
+}
+
+static void num_append(char* buf, size_t* pos, size_t max, uint32_t val) {
+    char tmp[12];
+    int i = 0;
+    if (val == 0) { tmp[i++] = '0'; }
+    else { while (val > 0) { tmp[i++] = '0' + val % 10; val /= 10; } }
+    for (int j = i - 1; j >= 0 && *pos < max - 1; j--)
+        buf[(*pos)++] = tmp[j];
+    buf[*pos] = '\0';
+}
+
+static int proc_cpuinfo_read(char* buf, size_t size) {
+    uint32_t eax, ebx, ecx, edx;
+    char vendor[13];
+    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0));
+    *((uint32_t*)&vendor[0]) = ebx;
+    *((uint32_t*)&vendor[4]) = edx;
+    *((uint32_t*)&vendor[8]) = ecx;
+    vendor[12] = '\0';
+
+    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
+
+    size_t p = 0;
+    str_append(buf, &p, size, "processor : 0\nvendor    : ");
+    str_append(buf, &p, size, vendor);
+    str_append(buf, &p, size, "\nfamily    : ");
+    num_append(buf, &p, size, (eax >> 8) & 0xF);
+    str_append(buf, &p, size, "\nmodel     : ");
+    num_append(buf, &p, size, (eax >> 4) & 0xF);
+    str_append(buf, &p, size, "\nstepping  : ");
+    num_append(buf, &p, size, eax & 0xF);
+    str_append(buf, &p, size, "\nflags     : ");
+    if (edx & (1 << 0)) str_append(buf, &p, size, "fpu ");
+    if (edx & (1 << 4)) str_append(buf, &p, size, "tsc ");
+    if (edx & (1 << 23)) str_append(buf, &p, size, "mmx ");
+    if (edx & (1 << 25)) str_append(buf, &p, size, "sse ");
+    if (edx & (1 << 26)) str_append(buf, &p, size, "sse2 ");
+    return (int)p;
+}
+
+static int proc_meminfo_read(char* buf, size_t size) {
+    size_t p = 0;
+    str_append(buf, &p, size, "HeapTotal : ");
+    num_append(buf, &p, size, (uint32_t)(mm_total() / 1024));
+    str_append(buf, &p, size, " kB\nHeapUsed  : ");
+    num_append(buf, &p, size, (uint32_t)(mm_used() / 1024));
+    str_append(buf, &p, size, " kB\nHeapFree  : ");
+    num_append(buf, &p, size, (uint32_t)(mm_free() / 1024));
+    str_append(buf, &p, size, " kB\nStack     : 16 kB");
+    return (int)p;
+}
+
+static int proc_uptime_read(char* buf, size_t size) {
+    size_t p = 0;
+    num_append(buf, &p, size, timer_seconds());
+    str_append(buf, &p, size, " seconds");
+    return (int)p;
 }

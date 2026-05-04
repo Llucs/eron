@@ -45,11 +45,31 @@ idt_load:
     lidt (idtp)
     ret
 
-# Handler de interrupção do teclado
+# Handler de interrupcao do timer (IRQ0)
+.global timer_handler_asm
+.extern timer_handler
+timer_handler_asm:
+    pusha
+    call timer_handler
+    popa
+    iret
+
+# Handler de interrupcao do teclado (IRQ1)
 .global keyboard_handler_asm
 .extern teclado_handler
 keyboard_handler_asm:
     pusha
     call teclado_handler
+    popa
+    iret
+
+# Handler de syscall (INT 0x80)
+.global syscall_handler_asm
+.extern syscall_dispatch
+syscall_handler_asm:
+    pusha
+    push %esp
+    call syscall_dispatch
+    add $4, %esp
     popa
     iret
