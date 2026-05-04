@@ -31,7 +31,7 @@ LINKER = $(BOOT_DIR)/linker.ld
 all: iso
 
 eron.bin: $(BOOT_OBJ) $(KERNEL_OBJS)
-	$(CC) -T $(LINKER) -o eron.bin $(LDFLAGS) $(BOOT_OBJ) $(KERNEL_OBJS)
+	$(CC) -T $(LINKER) -o eron.bin $(LDFLAGS) $(BOOT_OBJ) $(KERNEL_OBJS) -lgcc
 
 %.o: %.c
 	$(CC) -c $< -o $@ $(CFLAGS)

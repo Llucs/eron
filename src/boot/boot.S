@@ -5,8 +5,8 @@
 .set MAGIC,    0x1BADB002       # Número mágico para o bootloader encontrar o cabeçalho
 .set CHECKSUM, -(MAGIC + FLAGS) # Checksum para provar que é multiboot
 
-# Seção Multiboot
-.section .multiboot
+# Secao Multiboot (flag "a" = SHF_ALLOC para ser carregada em memoria)
+.section .multiboot, "a"
 .align 4
 .long MAGIC
 .long FLAGS
