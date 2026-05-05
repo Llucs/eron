@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 static struct framebuffer_info fb_info;
-static void* back_buffer;
+/* back_buffer removed - was unused */
 static int fb_initialized = 0;
 
 static uint8_t font_8x8[] = {

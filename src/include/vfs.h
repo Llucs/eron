@@ -29,7 +29,7 @@ typedef int (*vfs_write_fn)(const char* buf, size_t size);
 struct vfs_node {
     char path[VFS_PATH_LEN];
     enum vfs_type type;
-    char* data;
+    const char* data;
     vfs_read_fn read;
     vfs_write_fn write;
     uint32_t size;

@@ -9,8 +9,7 @@ static struct page_directory* current_pdir;
 static phys_addr_t phys_base;
 static uint32_t total_pages;
 
-static struct page_table* page_tables_free;
-static int free_table_count;
+/* Removed unused: page_tables_free, free_table_count */
 
 static phys_addr_t next_free_page;
 static phys_addr_t user_heap_start;

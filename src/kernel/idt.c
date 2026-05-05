@@ -29,33 +29,15 @@ void* memset(void* dest, int val, size_t len) {
     return dest;
 }
 
-/* Handle critical exceptions */
-static void handle_exception(const char* name, uint32_t error_code) {
-    /* Disable interrupts - we're in a bad state */
-    asm volatile("cli");
-    
-    /* Try to print error message if possible */
-    terminal_setcolor(0x0C); /* Red text */
-    terminal_writestring("\nKERNEL PANIC: ");
-    terminal_writestring(name);
-    terminal_writestring(" (error=0x");
-    
-    /* Print hex error code - simplified */
-    const char hex[] = "0123456789ABCDEF";
-    char buf[9];
-    for (int i = 7; i >= 0; i--) {
-        buf[i] = hex[error_code & 0xF];
-        error_code >>= 4;
-    }
-    buf[8] = '\0';
-    terminal_writestring(buf);
-    terminal_writestring(")\n");
-    
-    /* Halt the system */
-    for (;;) {
-        asm volatile("hlt");
-    }
-}
+/* Handle critical exceptions - UNUSED for now but useful for debugging */
+/* static void handle_exception(const char* name, uint32_t error_code) { */
+/*     /\* Disable interrupts - we're in a bad state *\/ */
+/*     asm volatile("cli"); */
+/*     terminal_setcolor(0x0C); /\* Red text *\/ */
+/*     terminal_writestring("\nKERNEL PANIC: "); */
+/*     terminal_writestring(name); */
+/*     for (;;) { asm volatile("hlt"); } */
+/* } */
 
 void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
     idt[num].base_low = (base & 0xFFFF);

@@ -23,7 +23,7 @@ static struct tracked_block {
     uint8_t in_use;
 } tracked_blocks[MAX_TRACKED_BLOCKS];
 
-static int tracked_count = 0;  /* For future use */
+/* tracked_count removed - was unused */
 
 static void track_add(void* ptr, uint32_t size) {
     for (int i = 0; i < MAX_TRACKED_BLOCKS; i++) {

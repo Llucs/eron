@@ -21,21 +21,7 @@ static int validate_user_ptr(const void* ptr, size_t size) {
     return 1;
 }
 
-static int validate_kernel_ptr(const void* ptr, size_t size) {
-    uint32_t addr = (uint32_t)ptr;
-    uint32_t end = addr + size;
-    if (addr == 0) return 0;
-    if (end > KERNEL_SPACE_END || end < addr) return 0;
-    return 1;
-}
-
-static int validate_read(const void* ptr, size_t size) {
-    return validate_user_ptr(ptr, size);
-}
-
-static int validate_write(const void* ptr, size_t size) {
-    return validate_user_ptr(ptr, size);
-}
+/* Removed unused: validate_kernel_ptr, validate_read, validate_write */
 
 static int do_write(int fd, const char* buf, size_t count) {
     if (fd == 1 || fd == 2) {
