@@ -8,7 +8,8 @@
 
 void mm_init(uint32_t start, uint32_t size);
 void* kmalloc(size_t size);
-void kfree(void* ptr);
+int kfree(void* ptr);
+int kfree_all(void);
 size_t mm_used(void);
 size_t mm_free(void);
 size_t mm_total(void);

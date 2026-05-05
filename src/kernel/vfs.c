@@ -1,7 +1,14 @@
 #include "../include/vfs.h"
+#include <stddef.h>
+
+#define VFS_MAX_PATH_LEN 256
+#define VFS_MAX_FILE_SIZE 4096
 
 static struct vfs_node nodes[VFS_MAX_NODES];
 static int node_count = 0;
+
+/* Security: Maximum read size limit */
+#define MAX_READ_SIZE 4096
 
 static size_t vfs_strlen(const char* s) {
     size_t n = 0;
@@ -29,6 +36,33 @@ static int vfs_strncmp(const char* a, const char* b, size_t n) {
     return 0;
 }
 
+/* Security: Validate path to prevent directory traversal */
+static int is_valid_path(const char* path) {
+    if (!path || !*path) return 0;
+    
+    /* Check for null byte in path */
+    for (const char* p = path; *p; p++) {
+        if (*p == '\0') return 0;
+    }
+    
+    /* Prevent traversal attempts - check for ".." anywhere in path */
+    const char* p = path;
+    while (*p) {
+        if (p[0] == '.' && p[1] == '.') return 0;
+        p++;
+    }
+    
+    return 1;
+}
+
+/* Check path length */
+static int is_valid_path_len(const char* path) {
+    if (!path) return 0;
+    size_t len = vfs_strlen(path);
+    if (len == 0 || len >= VFS_MAX_PATH_LEN) return 0;
+    return 1;
+}
+
 void vfs_init(void) {
     for (int i = 0; i < VFS_MAX_NODES; i++)
         nodes[i].type = VFS_UNUSED;
@@ -45,6 +79,8 @@ static struct vfs_node* vfs_alloc(void) {
 }
 
 int vfs_mkdir(const char* path) {
+    if (!is_valid_path(path) || !is_valid_path_len(path)) return -1;
+    
     struct vfs_node* n = vfs_alloc();
     if (!n) return -1;
     vfs_strcpy(n->path, path, VFS_PATH_LEN);
@@ -53,16 +89,29 @@ int vfs_mkdir(const char* path) {
 }
 
 int vfs_mkfile(const char* path, const char* content) {
+    if (!is_valid_path(path) || !is_valid_path_len(path)) return -1;
+    
     struct vfs_node* n = vfs_alloc();
     if (!n) return -1;
     vfs_strcpy(n->path, path, VFS_PATH_LEN);
     n->type = VFS_FILE;
-    n->data = content;
-    n->size = content ? (uint32_t)vfs_strlen(content) : 0;
+    
+    /* Security: Limit content size */
+    if (content) {
+        size_t len = vfs_strlen(content);
+        if (len >= VFS_MAX_FILE_SIZE) return -1;
+        n->data = content;
+        n->size = len;
+    } else {
+        n->data = (void*)0;
+        n->size = 0;
+    }
     return 0;
 }
 
 int vfs_mkdev(const char* path) {
+    if (!is_valid_path(path) || !is_valid_path_len(path)) return -1;
+    
     struct vfs_node* n = vfs_alloc();
     if (!n) return -1;
     vfs_strcpy(n->path, path, VFS_PATH_LEN);
@@ -71,6 +120,8 @@ int vfs_mkdev(const char* path) {
 }
 
 int vfs_mkproc(const char* path, vfs_read_fn read_fn) {
+    if (!is_valid_path(path) || !is_valid_path_len(path)) return -1;
+    
     struct vfs_node* n = vfs_alloc();
     if (!n) return -1;
     vfs_strcpy(n->path, path, VFS_PATH_LEN);
@@ -80,6 +131,8 @@ int vfs_mkproc(const char* path, vfs_read_fn read_fn) {
 }
 
 struct vfs_node* vfs_lookup(const char* path) {
+    if (!is_valid_path(path)) return (void*)0;
+    
     for (int i = 0; i < node_count; i++) {
         if (nodes[i].type != VFS_UNUSED && vfs_strcmp(nodes[i].path, path) == 0)
             return &nodes[i];
@@ -130,6 +183,12 @@ int vfs_list(const char* dir, struct vfs_node** out, int max) {
 }
 
 int vfs_read(const char* path, char* buf, size_t size) {
+    /* Security: Validate inputs */
+    if (!buf || size == 0) return -1;
+    
+    /* Security: Limit max read size */
+    if (size > MAX_READ_SIZE) size = MAX_READ_SIZE;
+    
     struct vfs_node* n = vfs_lookup(path);
     if (!n || n->type == VFS_DIR) return -1;
 
@@ -139,6 +198,7 @@ int vfs_read(const char* path, char* buf, size_t size) {
 
     if (n->data) {
         size_t len = vfs_strlen(n->data);
+        /* Security: Bound the copy size */
         if (len > size - 1) len = size - 1;
         for (size_t i = 0; i < len; i++)
             buf[i] = n->data[i];

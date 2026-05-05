@@ -1,6 +1,7 @@
 #include "../include/process.h"
 #include "../include/gdt.h"
 #include "../include/tss.h"
+#include "../include/mm.h"
 #include <stddef.h>
 
 extern void swtch(struct context** old, struct context* new_ctx);
@@ -9,6 +10,9 @@ extern void trapret(void);
 static struct process procs[PROC_MAX];
 static struct process* current_proc;
 static uint32_t next_pid = 1;
+
+/* Parent-child tracking */
+static uint32_t child_parent[PROC_MAX];
 
 static void p_strcpy(char* d, const char* s, int max) {
     int i;
@@ -20,6 +24,7 @@ void proc_init(void) {
     for (int i = 0; i < PROC_MAX; i++) {
         procs[i].state = PROC_UNUSED;
         procs[i].pid   = 0;
+        child_parent[i] = 0;
     }
     procs[0].pid   = 0;
     p_strcpy(procs[0].name, "kernel", PROC_NAME_LEN);
@@ -29,6 +34,12 @@ void proc_init(void) {
 }
 
 int proc_create(const char* name, uint32_t entry) {
+    /* SECURITY: Validate entry point */
+    if (entry == 0) return -1;
+    
+    /* SECURITY: Validate entry point is in user space range */
+    if (entry < 0x08000000 || entry >= 0xC0000000) return -1;
+    
     struct process* p = NULL;
     for (int i = 1; i < PROC_MAX; i++) {
         if (procs[i].state == PROC_UNUSED) {
@@ -77,6 +88,11 @@ int proc_create(const char* name, uint32_t entry) {
     p->ctx->ebp = 0;
     p->ctx->eip = (uint32_t)trapret;
 
+    /* Record parent relationship */
+    if (current_proc && current_proc->pid > 0) {
+        child_parent[p - procs] = current_proc->pid;
+    }
+    
     p->state = PROC_READY;
     return (int)p->pid;
 }

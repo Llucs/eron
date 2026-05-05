@@ -119,7 +119,14 @@ static void __attribute__((used)) user_loop(void) {
 }
 
 static void __attribute__((used)) user_crash(void) {
-    asm volatile("cli");
+    /* SECURITY: This now triggers a safe user-mode exception instead of halting the system */
+    /* Trigger a divide-by-zero which will be caught by the kernel */
+    asm volatile(
+        "mov $0, %%ebx\n"
+        "mov $1, %%eax\n"
+        "div %%ebx\n"
+        ::: "eax", "ebx", "edx", "memory"
+    );
 }
 
 /* ── registered programs ──────────────────────────────────── */
