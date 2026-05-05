@@ -3,7 +3,10 @@ CC = gcc
 AS = as
 GRUB_MKRESCUE = grub-mkrescue
 
+# Security-focused compiler flags (compatible with freestanding)
 CFLAGS = -m32 -std=gnu99 -ffreestanding -O2 -Wall -Wextra
+
+# Additional security linking flags - basic
 LDFLAGS = -m32 -ffreestanding -O2 -nostdlib -no-pie
 ASFLAGS = --32
 
@@ -38,7 +41,7 @@ LINKER = $(BOOT_DIR)/linker.ld
 all: iso
 
 eron.bin: $(BOOT_OBJ) $(KERNEL_OBJS)
-	$(CC) -T $(LINKER) -o eron.bin $(LDFLAGS) $(BOOT_OBJ) $(KERNEL_OBJS) -lgcc
+	$(CC) -T $(LINKER) -o eron.bin $(LDFLAGS) $(BOOT_OBJ) $(KERNEL_OBJS)
 
 %.o: %.c
 	$(CC) -c $< -o $@ $(CFLAGS)
