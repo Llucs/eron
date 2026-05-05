@@ -36,6 +36,7 @@ struct process {
     struct context* ctx;
     struct trapframe* tf;
     int exit_code;
+    struct page_directory* pdir;
 };
 
 void proc_init(void);

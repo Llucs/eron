@@ -14,6 +14,7 @@
 #include "../include/task.h"
 #include "../include/syscall.h"
 #include "../include/process.h"
+#include "../include/virtual_mm.h"
 
 void terminal_initialize(void);
 void terminal_setcolor(uint8_t color);
@@ -36,6 +37,12 @@ void print_prompt(void);
 static int proc_cpuinfo_read(char* buf, size_t size);
 static int proc_meminfo_read(char* buf, size_t size);
 static int proc_uptime_read(char* buf, size_t size);
+static void enable_paging(void) {
+    uint32_t cr0;
+    asm volatile("mov %%cr0, %0" : "=r"(cr0));
+    cr0 |= 0x80000000;
+    asm volatile("mov %0, %%cr0" : : "r"(cr0));
+}
 
 static void boot_log(const char* msg) {
     uint8_t arrow = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
@@ -131,6 +138,10 @@ void kernel_main(void) {
 
     mm_init((uint32_t)&_kernel_end, HEAP_SIZE);
     boot_log("Memory: 1 MB heap initialized");
+
+    vmm_init((uint32_t)&_kernel_end + 0x100000);
+    enable_paging();
+    boot_log("Paging: virtual memory enabled");
 
     vfs_init();
     vfs_populate();
