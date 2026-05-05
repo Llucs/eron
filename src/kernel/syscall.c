@@ -8,65 +8,61 @@
 extern void terminal_writestring(const char* data);
 extern void syscall_handler_asm(void);
 
-/* User space memory boundaries (typically 0x08000000 to 0xC0000000) */
 #define USER_SPACE_START 0x08000000
 #define USER_SPACE_END   0xC0000000
-
-/* Kernel memory boundaries */
 #define KERNEL_SPACE_START 0xC0000000
 #define KERNEL_SPACE_END   0xFFFFFFFF
 
-/* Validate that a pointer is in user space */
 static int validate_user_ptr(const void* ptr, size_t size) {
     uint32_t addr = (uint32_t)ptr;
     uint32_t end = addr + size;
-    
-    /* Check for NULL or obviously invalid */
     if (addr == 0 || addr < USER_SPACE_START) return 0;
     if (end > USER_SPACE_END || end < addr) return 0;
-    
     return 1;
 }
 
-/* Validate that a pointer is in kernel space */
 static int validate_kernel_ptr(const void* ptr, size_t size) {
     uint32_t addr = (uint32_t)ptr;
     uint32_t end = addr + size;
-    
-    /* Check for NULL */
     if (addr == 0) return 0;
     if (end > KERNEL_SPACE_END || end < addr) return 0;
-    
     return 1;
 }
 
-/* Validate memory read access */
 static int validate_read(const void* ptr, size_t size) {
     return validate_user_ptr(ptr, size);
 }
 
-/* Validate memory write access */
 static int validate_write(const void* ptr, size_t size) {
     return validate_user_ptr(ptr, size);
+}
+
+static int do_write(int fd, const char* buf, size_t count) {
+    if (fd == 1 || fd == 2) {
+        if (validate_user_ptr(buf, count)) {
+            terminal_writestring(buf);
+        }
+        return (int)count;
+    }
+    return -1;
+}
+
+static int do_read(int fd, char* buf, size_t count) {
+    (void)fd;
+    (void)buf;
+    (void)count;
+    return -1;
 }
 
 void syscall_handle(struct trapframe* tf) {
     switch (tf->eax) {
     case SYS_WRITE: {
-        /* Validate: ebx = fd, ecx = buffer, edx = count */
-        if (tf->ebx == 1 && tf->ecx) {
-            /* Validate user pointer before using */
-            if (validate_user_ptr((const void*)tf->ecx, 1)) {
-                terminal_writestring((const char*)tf->ecx);
-            }
-        }
-        tf->eax = 0;
+        tf->eax = do_write((int)tf->ebx, (const char*)tf->ecx, (size_t)tf->edx);
         break;
     }
 
     case SYS_READ: {
-        /* SYS_READ not fully implemented - return error */
-        tf->eax = (uint32_t)-1;
+        tf->eax = do_read((int)tf->ebx, (char*)tf->ecx, (size_t)tf->edx);
         break;
     }
 
@@ -80,9 +76,39 @@ void syscall_handle(struct trapframe* tf) {
         break;
     }
 
+    case SYS_GETTID: {
+        struct process* p = proc_current();
+        tf->eax = p ? p->pid : 0;
+        break;
+    }
+
+    case SYS_GETPPID: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_GETUID: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_GETEUID: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_GETGID: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_GETEGID: {
+        tf->eax = 0;
+        break;
+    }
+
     case SYS_MALLOC: {
-        /* Validate size request */
-        if (tf->ebx < 0x100000) { /* Max 1MB allocation */
+        if (tf->ebx < 0x100000) {
             tf->eax = (uint32_t)kmalloc(tf->ebx);
         } else {
             tf->eax = 0;
@@ -91,7 +117,6 @@ void syscall_handle(struct trapframe* tf) {
     }
 
     case SYS_FREE: {
-        /* Validate pointer before freeing */
         if (tf->ebx && validate_user_ptr((const void*)tf->ebx, 1)) {
             kfree((void*)tf->ebx);
         }
@@ -108,20 +133,129 @@ void syscall_handle(struct trapframe* tf) {
         proc_yield();
         break;
 
-    case SYS_OPEN:
-    case SYS_CLOSE:
-    case SYS_STAT:
-        /* VFS operations - validate pointers */
+    case SYS_SLEEP: {
+        uint32_t target = timer_seconds() + tf->ebx;
+        while (timer_seconds() < target) {
+            proc_yield();
+        }
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_OPEN: {
         if (tf->ebx && validate_user_ptr((const void*)tf->ebx, 1)) {
-            /* File operations would go here */
+            const char* path = (const char*)tf->ebx;
+            struct vfs_node* n = vfs_lookup(path);
+            if (n) {
+                tf->eax = 0;
+            } else {
+                tf->eax = (uint32_t)-1;
+            }
+        } else {
+            tf->eax = (uint32_t)-1;
+        }
+        break;
+    }
+
+    case SYS_CLOSE: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_LSEEK: {
+        tf->eax = (uint32_t)-1;
+        break;
+    }
+
+    case SYS_STAT: {
+        if (tf->ebx && validate_user_ptr((const void*)tf->ebx, 1)) {
+            tf->eax = (uint32_t)-1;
         }
         tf->eax = (uint32_t)-1;
         break;
+    }
 
-    case SYS_EXEC:
-        /* SECURE: Only kernel can exec, not from userspace directly */
+    case SYS_EXEC: {
         tf->eax = (uint32_t)-1;
         break;
+    }
+
+    case SYS_FORK: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_KILL: {
+        tf->eax = (uint32_t)-1;
+        break;
+    }
+
+    case SYS_ALARM: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_BRK: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_DUP: {
+        tf->eax = (int)tf->ebx;
+        break;
+    }
+
+    case SYS_DUP2: {
+        tf->eax = (int)tf->ebx;
+        break;
+    }
+
+    case SYS_PIPE: {
+        tf->eax = (uint32_t)-1;
+        break;
+    }
+
+    case SYS_CHMOD: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_MKDIR: {
+        if (tf->ebx && validate_user_ptr((const void*)tf->ebx, 1)) {
+            tf->eax = vfs_mkdir((const char*)tf->ebx);
+        } else {
+            tf->eax = (uint32_t)-1;
+        }
+        break;
+    }
+
+    case SYS_RMDIR:
+    case SYS_UNLINK: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_RENAME: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_UMASK: {
+        tf->eax = 0;
+        break;
+    }
+
+    case SYS_GETCWD:
+    case SYS_GETPGRP:
+    case SYS_GETSID:
+    case SYS_SETSID: {
+        tf->eax = 0;
+        break;
+    }
+    case SYS_SETPGRP: {
+        tf->eax = 0;
+        break;
+    }
 
     default:
         tf->eax = (uint32_t)-1;

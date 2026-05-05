@@ -3,10 +3,7 @@ CC = gcc
 AS = as
 GRUB_MKRESCUE = grub-mkrescue
 
-# Security-focused compiler flags (compatible with freestanding)
-CFLAGS = -m32 -std=gnu99 -ffreestanding -O2 -Wall -Wextra
-
-# Additional security linking flags - basic
+CFLAGS = -m32 -std=gnu99 -ffreestanding -O2 -Wall -Wextra -fno-stack-protector -fno-pie
 LDFLAGS = -m32 -ffreestanding -O2 -nostdlib -no-pie
 ASFLAGS = --32
 
@@ -32,7 +29,10 @@ KERNEL_OBJS = $(KERNEL_DIR)/kernel.o \
               $(KERNEL_DIR)/display.o \
               $(KERNEL_DIR)/process.o \
               $(KERNEL_DIR)/elf.o \
-              $(KERNEL_DIR)/interrupt.o
+              $(KERNEL_DIR)/interrupt.o \
+              $(KERNEL_DIR)/virtual_mm.o \
+              $(KERNEL_DIR)/mouse.o \
+              $(KERNEL_DIR)/framebuffer.o
 
 LINKER = $(BOOT_DIR)/linker.ld
 
@@ -52,16 +52,15 @@ eron.bin: $(BOOT_OBJ) $(KERNEL_OBJS)
 iso: eron.iso
 
 eron.iso: eron.bin
-	@echo "Creating isodir..."
 	mkdir -p $(ISODIR)/boot/grub
 	cp eron.bin $(ISODIR)/boot/eron.bin
-	@echo 'set timeout=3' > $(ISODIR)/boot/grub/grub.cfg
-	@echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo 'menuentry "Eron OS" {' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '	multiboot /boot/eron.bin' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '	boot' >> $(ISODIR)/boot/grub/grub.cfg
-	@echo '}' >> $(ISODIR)/boot/grub/grub.cfg
+	echo 'set timeout=3' > $(ISODIR)/boot/grub/grub.cfg
+	echo 'set default=0' >> $(ISODIR)/boot/grub/grub.cfg
+	echo '' >> $(ISODIR)/boot/grub/grub.cfg
+	echo 'menuentry "Eron OS" {' >> $(ISODIR)/boot/grub/grub.cfg
+	echo '	multiboot /boot/eron.bin' >> $(ISODIR)/boot/grub/grub.cfg
+	echo '	boot' >> $(ISODIR)/boot/grub/grub.cfg
+	echo '}' >> $(ISODIR)/boot/grub/grub.cfg
 	$(GRUB_MKRESCUE) -o eron.iso $(ISODIR)
 
 clean:

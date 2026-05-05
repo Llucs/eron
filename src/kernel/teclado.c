@@ -7,11 +7,19 @@ extern void terminal_putchar(char c);
 
 static bool shift_pressed = false;
 static bool caps_lock = false;
+static bool ctrl_pressed = false;
+static bool alt_pressed = false;
 
-#define KB_BUF_SZ 64
+#define KB_BUF_SZ 128
 static volatile char kb_buf[KB_BUF_SZ];
-static volatile int  kb_head = 0;
-static volatile int  kb_tail = 0;
+static volatile int kb_head = 0;
+static volatile int kb_tail = 0;
+static volatile int kb_state = 0;
+
+#define KB_STATE_SHIFT 0x01
+#define KB_STATE_CTRL 0x02
+#define KB_STATE_ALT 0x04
+#define KB_STATE_CAPS 0x08
 
 static unsigned char kbdus_lower[128] = {
     0,  27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
@@ -48,14 +56,41 @@ void keyboard_irq(void) {
 
     if (scancode == 0x2A || scancode == 0x36) {
         shift_pressed = true;
+        kb_state |= KB_STATE_SHIFT;
         return;
     }
     if (scancode == 0xAA || scancode == 0xB6) {
         shift_pressed = false;
+        kb_state &= ~KB_STATE_SHIFT;
+        return;
+    }
+    if (scancode == 0x1D) {
+        ctrl_pressed = true;
+        kb_state |= KB_STATE_CTRL;
+        return;
+    }
+    if (scancode == 0x9D) {
+        ctrl_pressed = false;
+        kb_state &= ~KB_STATE_CTRL;
+        return;
+    }
+    if (scancode == 0x38) {
+        alt_pressed = true;
+        kb_state |= KB_STATE_ALT;
+        return;
+    }
+    if (scancode == 0xB8) {
+        alt_pressed = false;
+        kb_state &= ~KB_STATE_ALT;
         return;
     }
     if (scancode == 0x3A) {
         caps_lock = !caps_lock;
+        if (caps_lock) kb_state |= KB_STATE_CAPS;
+        else kb_state &= ~KB_STATE_CAPS;
+        return;
+    }
+    if (scancode == 0xE0) {
         return;
     }
 
@@ -86,4 +121,17 @@ char keyboard_getchar(void) {
     char c = kb_buf[kb_tail];
     kb_tail = (kb_tail + 1) % KB_BUF_SZ;
     return c;
+}
+
+int keyboard_available(void) {
+    return (kb_head != kb_tail) ? 1 : 0;
+}
+
+int keyboard_get_state(void) {
+    return kb_state;
+}
+
+void keyboard_clear_buffer(void) {
+    kb_head = 0;
+    kb_tail = 0;
 }
