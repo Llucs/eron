@@ -153,15 +153,33 @@ void kernel_main(void) {
     programs_init();
     shell_register_programs();
 
-    char prog_msg[32] = "Programs: ";
+    char prog_msg[48];
     int pc = program_count();
-    prog_msg[10] = '0' + (pc / 10);
-    prog_msg[11] = '0' + (pc % 10);
-    prog_msg[12] = ' ';
-    prog_msg[13] = 'r'; prog_msg[14] = 'e'; prog_msg[15] = 'g';
-    prog_msg[16] = 'i'; prog_msg[17] = 's'; prog_msg[18] = 't';
-    prog_msg[19] = 'e'; prog_msg[20] = 'r'; prog_msg[21] = 'e';
-    prog_msg[22] = 'd'; prog_msg[23] = '\0';
+    int idx = 0;
+
+    prog_msg[idx++] = 'P'; prog_msg[idx++] = 'r'; prog_msg[idx++] = 'o';
+    prog_msg[idx++] = 'g'; prog_msg[idx++] = 'r'; prog_msg[idx++] = 'a';
+    prog_msg[idx++] = 'm'; prog_msg[idx++] = 's'; prog_msg[idx++] = ':';
+    prog_msg[idx++] = ' ';
+
+    if (pc == 0) {
+        prog_msg[idx++] = '0';
+    } else {
+        char digits[10];
+        int d = 0;
+        while (pc > 0 && d < 10) {
+            digits[d++] = '0' + (pc % 10);
+            pc /= 10;
+        }
+        for (int i = d - 1; i >= 0; i--) prog_msg[idx++] = digits[i];
+    }
+
+    prog_msg[idx++] = ' ';
+    prog_msg[idx++] = 'r'; prog_msg[idx++] = 'e'; prog_msg[idx++] = 'g';
+    prog_msg[idx++] = 'i'; prog_msg[idx++] = 's'; prog_msg[idx++] = 't';
+    prog_msg[idx++] = 'e'; prog_msg[idx++] = 'r'; prog_msg[idx++] = 'e';
+    prog_msg[idx++] = 'd';
+    prog_msg[idx] = '\0';
     boot_log(prog_msg);
 
     syscall_init();
