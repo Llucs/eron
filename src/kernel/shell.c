@@ -22,6 +22,22 @@ extern const char* vfs_basename(const char* path);
 static char cmd_buffer[128];
 static int cmd_index = 0;
 
+struct service_entry {
+    const char* name;
+    const char* description;
+    uint8_t enabled;
+    uint8_t running;
+};
+
+static struct service_entry services[] = {
+    {"netd", "network bootstrap daemon", 1, 0},
+    {"sshd", "remote shell daemon", 0, 0},
+    {"audiod", "audio mixer daemon", 0, 0},
+    {"guid", "graphical session daemon", 0, 0}
+};
+
+#define SERVICE_COUNT (sizeof(services) / sizeof(services[0]))
+
 static int str_cmp(const char* a, const char* b) {
     while (*a && (*a == *b)) { a++; b++; }
     return *(unsigned char*)a - *(unsigned char*)b;
@@ -79,11 +95,18 @@ static uint8_t bcd_to_bin(uint8_t bcd) {
 void print_prompt(void) {
     uint8_t name_c = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
     uint8_t body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    uint8_t accent = vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
 
     terminal_setcolor(name_c);
-    terminal_writestring("eron");
+    terminal_writestring(ERON_USER);
+    terminal_setcolor(accent);
+    terminal_writestring("@");
+    terminal_setcolor(name_c);
+    terminal_writestring(ERON_HOSTNAME);
     terminal_setcolor(body);
-    terminal_writestring(":/# ");
+    terminal_writestring(":/ ");
+    terminal_setcolor(accent);
+    terminal_writestring("$ ");
 }
 
 /* ── embedded user-mode programs ──────────────────────────── */
@@ -232,8 +255,94 @@ static int prog_about(int argc, char* argv[]) {
     terminal_writestring("INT 0x80\n");
 
     terminal_setcolor(dim_c);
-    terminal_writestring(" Author    " ERON_AUTHOR);
+    terminal_writestring(" Author    " ERON_AUTHOR "\n");
 
+    return 0;
+}
+
+static int prog_fastfetch(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    uint8_t logo = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
+    uint8_t key = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    uint8_t val = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    terminal_setcolor(logo);
+    terminal_writestring("\n      /\\\n");
+    terminal_writestring("     /  \\    ");
+    terminal_setcolor(key); terminal_writestring("OS:      "); terminal_setcolor(val); terminal_writestring("EronOS\n");
+    terminal_setcolor(logo); terminal_writestring("    / /\\ \\   ");
+    terminal_setcolor(key); terminal_writestring("Host:    "); terminal_setcolor(val); terminal_writestring(ERON_HOSTNAME "\n");
+    terminal_setcolor(logo); terminal_writestring("   / ____ \\  ");
+    terminal_setcolor(key); terminal_writestring("Kernel:  "); terminal_setcolor(val); terminal_writestring(ERON_VERSION "-" ERON_CODENAME "\n");
+    terminal_setcolor(logo); terminal_writestring("  /_/    \\_\\ ");
+    terminal_setcolor(key); terminal_writestring("Shell:   "); terminal_setcolor(val); terminal_writestring(ERON_SHELL " " ERON_SHELL_VER "\n");
+    terminal_setcolor(key); terminal_writestring("              Uptime:  "); terminal_setcolor(val); print_num(timer_uptime_hours()); terminal_writestring("h "); print_num(timer_uptime_minutes()); terminal_writestring("m\n");
+    terminal_setcolor(key); terminal_writestring("              Memory:  "); terminal_setcolor(val); print_num((uint32_t)(mm_used() / 1024)); terminal_writestring("/"); print_num((uint32_t)(mm_total() / 1024)); terminal_writestring(" kB\n");
+    terminal_setcolor(key); terminal_writestring("              Procs:   "); terminal_setcolor(val); print_num((uint32_t)proc_active_count()); terminal_writestring("\n");
+    return 0;
+}
+
+static int prog_roadmap(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_writestring("\nEronOS next-level roadmap:");
+    terminal_writestring("\n [1] Stable userland ABI + libc subset");
+    terminal_writestring("\n [2] ELF loader hardening + per-process VM");
+    terminal_writestring("\n [3] Storage stack: initrd + ext2 driver");
+    terminal_writestring("\n [4] Networking: PCI probe + e1000 + TCP/IP");
+    terminal_writestring("\n [5] Graphics: VBE framebuffer + compositor");
+    terminal_writestring("\n [6] Package manager + signed repos");
+    return 0;
+}
+
+static struct service_entry* service_find(const char* name) {
+    for (size_t i = 0; i < SERVICE_COUNT; i++) {
+        if (str_cmp(services[i].name, name) == 0)
+            return &services[i];
+    }
+    return NULL;
+}
+
+static void service_print_status(struct service_entry* svc) {
+    terminal_writestring(" ");
+    terminal_writestring(svc->name);
+    terminal_writestring("  ");
+    terminal_writestring(svc->running ? "running" : "stopped");
+    terminal_writestring("  ");
+    terminal_writestring(svc->enabled ? "enabled" : "disabled");
+    terminal_writestring("  ");
+    terminal_writestring(svc->description);
+    terminal_writestring("\n");
+}
+
+static int prog_service(int argc, char* argv[]) {
+    if (argc == 1 || str_cmp(argv[1], "status") == 0) {
+        terminal_writestring("\nSERVICE   STATE    BOOT      DESCRIPTION\n");
+        for (size_t i = 0; i < SERVICE_COUNT; i++) service_print_status(&services[i]);
+        return 0;
+    }
+
+    if (argc < 3) {
+        terminal_writestring("\nservice: usage: service <start|stop|enable|disable|status> <name>");
+        return 1;
+    }
+
+    struct service_entry* svc = service_find(argv[2]);
+    if (!svc) {
+        terminal_writestring("\nservice: unknown service");
+        return 1;
+    }
+
+    if (str_cmp(argv[1], "start") == 0) svc->running = 1;
+    else if (str_cmp(argv[1], "stop") == 0) svc->running = 0;
+    else if (str_cmp(argv[1], "enable") == 0) svc->enabled = 1;
+    else if (str_cmp(argv[1], "disable") == 0) svc->enabled = 0;
+    else {
+        terminal_writestring("\nservice: invalid action");
+        return 1;
+    }
+
+    terminal_writestring("\n");
+    service_print_status(svc);
     return 0;
 }
 
@@ -635,6 +744,9 @@ static int prog_exec(int argc, char* argv[]) {
 void shell_register_programs(void) {
     program_register("help",    "show commands",          prog_help);
     program_register("about",   "system information",     prog_about);
+    program_register("fastfetch","quick system summary",  prog_fastfetch);
+    program_register("roadmap", "next-level OS plan",     prog_roadmap);
+    program_register("service", "service manager",         prog_service);
     program_register("clear",   "clear terminal",         prog_clear);
     program_register("uname",   "kernel identification",  prog_uname);
     program_register("uptime",  "system uptime",          prog_uptime);
