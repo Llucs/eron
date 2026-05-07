@@ -33,6 +33,7 @@ extern uint32_t stack_top;
 void shell_register_programs(void);
 void shell_input(char c);
 void print_prompt(void);
+void shell_run_script(const char* path);
 
 static int proc_cpuinfo_read(char* buf, size_t size);
 static int proc_meminfo_read(char* buf, size_t size);
@@ -67,6 +68,11 @@ static void vfs_populate(void) {
     vfs_mkfile("/etc/hostname", ERON_HOSTNAME);
     vfs_mkfile("/etc/version", "Eron OS " ERON_VERSION " (" ERON_CODENAME ")");
     vfs_mkfile("/etc/motd", "Welcome to Eron OS.\nType 'help' for commands.");
+    vfs_mkfile("/etc/init.rc",
+        "mkdir /var/log\n"
+        "touch /var/log/boot.log\n"
+        "append /var/log/boot.log boot sequence complete\n"
+        "service start netd");
     vfs_mkfile("/etc/os-release",
         "NAME=EronOS\nVERSION=" ERON_VERSION "\nCODENAME=" ERON_CODENAME
         "\nARCH=i386\nAUTHOR=" ERON_AUTHOR);
@@ -152,6 +158,7 @@ void kernel_main(void) {
 
     programs_init();
     shell_register_programs();
+    shell_run_script("/etc/init.rc");
 
     char prog_msg[48];
     int pc = program_count();

@@ -21,6 +21,7 @@ extern const char* vfs_basename(const char* path);
 
 static char cmd_buffer[128];
 static int cmd_index = 0;
+static int shell_batch_mode = 0;
 
 struct service_entry {
     const char* name;
@@ -983,20 +984,20 @@ void execute_command(char* cmd) {
     terminal_setcolor(body);
 
     if (cmd[0] == '\0') {
-        print_prompt();
+        if (!shell_batch_mode) print_prompt();
         return;
     }
 
     char* argv[16];
     int argc = parse_args(cmd, argv, 16);
     if (argc == 0) {
-        print_prompt();
+        if (!shell_batch_mode) print_prompt();
         return;
     }
 
     if (str_cmp(argv[0], "clear") == 0) {
         prog_clear(argc, argv);
-        print_prompt();
+        if (!shell_batch_mode) print_prompt();
         return;
     }
 
@@ -1018,7 +1019,24 @@ void execute_command(char* cmd) {
 
     terminal_setcolor(body);
     terminal_writestring("\n");
-    print_prompt();
+    if (!shell_batch_mode) print_prompt();
+}
+
+void shell_run_script(const char* path) {
+    char script[1024];
+    int len = vfs_read(path, script, sizeof(script));
+    if (len <= 0) return;
+
+    shell_batch_mode = 1;
+    int start = 0;
+    for (int i = 0; i <= len; i++) {
+        if (script[i] == '\n' || script[i] == '\0') {
+            script[i] = '\0';
+            if (script[start] != '\0') execute_command(&script[start]);
+            start = i + 1;
+        }
+    }
+    shell_batch_mode = 0;
 }
 
 void shell_input(char c) {
