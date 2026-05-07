@@ -1,4 +1,4 @@
-# Eron OS
+# Eron OS (There are some problems at the moment, but they will be fixed soon...)
 
 A 32-bit operating system kernel built from scratch in C and x86 Assembly.
 
