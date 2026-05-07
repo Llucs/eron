@@ -22,6 +22,22 @@ extern const char* vfs_basename(const char* path);
 static char cmd_buffer[128];
 static int cmd_index = 0;
 
+struct service_entry {
+    const char* name;
+    const char* description;
+    uint8_t enabled;
+    uint8_t running;
+};
+
+static struct service_entry services[] = {
+    {"netd", "network bootstrap daemon", 1, 0},
+    {"sshd", "remote shell daemon", 0, 0},
+    {"audiod", "audio mixer daemon", 0, 0},
+    {"guid", "graphical session daemon", 0, 0}
+};
+
+#define SERVICE_COUNT (sizeof(services) / sizeof(services[0]))
+
 static int str_cmp(const char* a, const char* b) {
     while (*a && (*a == *b)) { a++; b++; }
     return *(unsigned char*)a - *(unsigned char*)b;
@@ -79,11 +95,18 @@ static uint8_t bcd_to_bin(uint8_t bcd) {
 void print_prompt(void) {
     uint8_t name_c = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
     uint8_t body = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    uint8_t accent = vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
 
     terminal_setcolor(name_c);
-    terminal_writestring("eron");
+    terminal_writestring(ERON_USER);
+    terminal_setcolor(accent);
+    terminal_writestring("@");
+    terminal_setcolor(name_c);
+    terminal_writestring(ERON_HOSTNAME);
     terminal_setcolor(body);
-    terminal_writestring(":/# ");
+    terminal_writestring(":/ ");
+    terminal_setcolor(accent);
+    terminal_writestring("$ ");
 }
 
 /* ── embedded user-mode programs ──────────────────────────── */
@@ -232,8 +255,277 @@ static int prog_about(int argc, char* argv[]) {
     terminal_writestring("INT 0x80\n");
 
     terminal_setcolor(dim_c);
-    terminal_writestring(" Author    " ERON_AUTHOR);
+    terminal_writestring(" Author    " ERON_AUTHOR "\n");
 
+    return 0;
+}
+
+static int prog_fastfetch(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    uint8_t logo = vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
+    uint8_t key = vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+    uint8_t val = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    terminal_setcolor(logo);
+    terminal_writestring("\n      /\\\n");
+    terminal_writestring("     /  \\    ");
+    terminal_setcolor(key); terminal_writestring("OS:      "); terminal_setcolor(val); terminal_writestring("EronOS\n");
+    terminal_setcolor(logo); terminal_writestring("    / /\\ \\   ");
+    terminal_setcolor(key); terminal_writestring("Host:    "); terminal_setcolor(val); terminal_writestring(ERON_HOSTNAME "\n");
+    terminal_setcolor(logo); terminal_writestring("   / ____ \\  ");
+    terminal_setcolor(key); terminal_writestring("Kernel:  "); terminal_setcolor(val); terminal_writestring(ERON_VERSION "-" ERON_CODENAME "\n");
+    terminal_setcolor(logo); terminal_writestring("  /_/    \\_\\ ");
+    terminal_setcolor(key); terminal_writestring("Shell:   "); terminal_setcolor(val); terminal_writestring(ERON_SHELL " " ERON_SHELL_VER "\n");
+    terminal_setcolor(key); terminal_writestring("              Uptime:  "); terminal_setcolor(val); print_num(timer_uptime_hours()); terminal_writestring("h "); print_num(timer_uptime_minutes()); terminal_writestring("m\n");
+    terminal_setcolor(key); terminal_writestring("              Memory:  "); terminal_setcolor(val); print_num((uint32_t)(mm_used() / 1024)); terminal_writestring("/"); print_num((uint32_t)(mm_total() / 1024)); terminal_writestring(" kB\n");
+    terminal_setcolor(key); terminal_writestring("              Procs:   "); terminal_setcolor(val); print_num((uint32_t)proc_active_count()); terminal_writestring("\n");
+    return 0;
+}
+
+static int prog_roadmap(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    terminal_writestring("\nEronOS next-level roadmap:");
+    terminal_writestring("\n [1] Stable userland ABI + libc subset");
+    terminal_writestring("\n [2] ELF loader hardening + per-process VM");
+    terminal_writestring("\n [3] Storage stack: initrd + ext2 driver");
+    terminal_writestring("\n [4] Networking: PCI probe + e1000 + TCP/IP");
+    terminal_writestring("\n [5] Graphics: VBE framebuffer + compositor");
+    terminal_writestring("\n [6] Package manager + signed repos");
+    return 0;
+}
+
+static struct service_entry* service_find(const char* name) {
+    for (size_t i = 0; i < SERVICE_COUNT; i++) {
+        if (str_cmp(services[i].name, name) == 0)
+            return &services[i];
+    }
+    return NULL;
+}
+
+static void service_print_status(struct service_entry* svc) {
+    terminal_writestring(" ");
+    terminal_writestring(svc->name);
+    terminal_writestring("  ");
+    terminal_writestring(svc->running ? "running" : "stopped");
+    terminal_writestring("  ");
+    terminal_writestring(svc->enabled ? "enabled" : "disabled");
+    terminal_writestring("  ");
+    terminal_writestring(svc->description);
+    terminal_writestring("\n");
+}
+
+static int prog_service(int argc, char* argv[]) {
+    if (argc == 1 || str_cmp(argv[1], "status") == 0) {
+        terminal_writestring("\nSERVICE   STATE    BOOT      DESCRIPTION\n");
+        for (size_t i = 0; i < SERVICE_COUNT; i++) service_print_status(&services[i]);
+        return 0;
+    }
+
+    if (argc < 3) {
+        terminal_writestring("\nservice: usage: service <start|stop|enable|disable|status> <name>");
+        return 1;
+    }
+
+    struct service_entry* svc = service_find(argv[2]);
+    if (!svc) {
+        terminal_writestring("\nservice: unknown service");
+        return 1;
+    }
+
+    if (str_cmp(argv[1], "start") == 0) svc->running = 1;
+    else if (str_cmp(argv[1], "stop") == 0) svc->running = 0;
+    else if (str_cmp(argv[1], "enable") == 0) svc->enabled = 1;
+    else if (str_cmp(argv[1], "disable") == 0) svc->enabled = 0;
+    else {
+        terminal_writestring("\nservice: invalid action");
+        return 1;
+    }
+
+    terminal_writestring("\n");
+    service_print_status(svc);
+    return 0;
+}
+
+static int prog_touch(int argc, char* argv[]) {
+    if (argc < 2) {
+        terminal_writestring("\ntouch: usage: touch <file>");
+        return 1;
+    }
+    if (vfs_lookup(argv[1])) return 0;
+    if (vfs_mkfile(argv[1], "") < 0) {
+        terminal_writestring("\ntouch: cannot create file");
+        return 1;
+    }
+    return 0;
+}
+
+static int prog_write(int argc, char* argv[]) {
+    if (argc < 3) {
+        terminal_writestring("\nwrite: usage: write <file> <text>");
+        return 1;
+    }
+
+    if (!vfs_lookup(argv[1])) {
+        if (vfs_mkfile(argv[1], "") < 0) {
+            terminal_writestring("\nwrite: cannot create file");
+            return 1;
+        }
+    }
+
+    char buf[512];
+    int p = 0;
+    for (int i = 2; i < argc && p < (int)sizeof(buf) - 1; i++) {
+        if (i > 2 && p < (int)sizeof(buf) - 1) buf[p++] = ' ';
+        for (int j = 0; argv[i][j] && p < (int)sizeof(buf) - 1; j++)
+            buf[p++] = argv[i][j];
+    }
+    buf[p] = '\0';
+
+    if (vfs_write(argv[1], buf, (size_t)p) < 0) {
+        terminal_writestring("\nwrite: failed");
+        return 1;
+    }
+    return 0;
+}
+
+static int prog_rm(int argc, char* argv[]) {
+    if (argc < 2) {
+        terminal_writestring("\nrm: usage: rm <path>");
+        return 1;
+    }
+    if (vfs_remove(argv[1]) < 0) {
+        terminal_writestring("\nrm: cannot remove");
+        return 1;
+    }
+    return 0;
+}
+
+static int prog_mv(int argc, char* argv[]) {
+    if (argc < 3) {
+        terminal_writestring("\nmv: usage: mv <src> <dst>");
+        return 1;
+    }
+    if (vfs_rename(argv[1], argv[2]) < 0) {
+        terminal_writestring("\nmv: failed");
+        return 1;
+    }
+    return 0;
+}
+
+static int prog_mkdir(int argc, char* argv[]) {
+    if (argc < 2) {
+        terminal_writestring("\nmkdir: usage: mkdir <dir>");
+        return 1;
+    }
+    if (vfs_mkdir(argv[1]) < 0) {
+        terminal_writestring("\nmkdir: failed");
+        return 1;
+    }
+    return 0;
+}
+
+static int prog_stat(int argc, char* argv[]) {
+    if (argc < 2) {
+        terminal_writestring("\nstat: usage: stat <path>");
+        return 1;
+    }
+    struct vfs_node* n = vfs_lookup(argv[1]);
+    if (!n) {
+        terminal_writestring("\nstat: not found");
+        return 1;
+    }
+    terminal_writestring("\nPath: ");
+    terminal_writestring(n->path);
+    terminal_writestring("\nType: ");
+    if (n->type == VFS_DIR) terminal_writestring("dir");
+    else if (n->type == VFS_FILE) terminal_writestring("file");
+    else if (n->type == VFS_DEV) terminal_writestring("dev");
+    else terminal_writestring("other");
+    terminal_writestring("\nSize: ");
+    print_num(n->size);
+    terminal_writestring("\nPerm: ");
+    terminal_writestring((n->perm & VFS_PERM_READ) ? "r" : "-");
+    terminal_writestring((n->perm & VFS_PERM_WRITE) ? "w" : "-");
+    terminal_writestring((n->perm & VFS_PERM_EXEC) ? "x" : "-");
+    return 0;
+}
+
+static int prog_cp(int argc, char* argv[]) {
+    if (argc < 3) {
+        terminal_writestring("\ncp: usage: cp <src> <dst>");
+        return 1;
+    }
+    char buf[1024];
+    int len = vfs_read(argv[1], buf, sizeof(buf));
+    if (len < 0) {
+        terminal_writestring("\ncp: source read failed");
+        return 1;
+    }
+    if (!vfs_lookup(argv[2]) && vfs_mkfile(argv[2], "") < 0) {
+        terminal_writestring("\ncp: cannot create destination");
+        return 1;
+    }
+    if (vfs_write(argv[2], buf, (size_t)len) < 0) {
+        terminal_writestring("\ncp: destination write failed");
+        return 1;
+    }
+    return 0;
+}
+
+static int prog_append(int argc, char* argv[]) {
+    if (argc < 3) {
+        terminal_writestring("\nappend: usage: append <file> <text>");
+        return 1;
+    }
+    char current[1024];
+    int len = vfs_read(argv[1], current, sizeof(current));
+    if (len < 0) {
+        if (vfs_mkfile(argv[1], "") < 0) {
+            terminal_writestring("\nappend: cannot create file");
+            return 1;
+        }
+        len = 0;
+        current[0] = '\0';
+    }
+
+    char out[1024];
+    int p = 0;
+    for (int i = 0; i < len && p < (int)sizeof(out) - 1; i++) out[p++] = current[i];
+    if (p > 0 && p < (int)sizeof(out) - 1) out[p++] = ' ';
+    for (int i = 2; i < argc && p < (int)sizeof(out) - 1; i++) {
+        if (i > 2 && p < (int)sizeof(out) - 1) out[p++] = ' ';
+        for (int j = 0; argv[i][j] && p < (int)sizeof(out) - 1; j++) out[p++] = argv[i][j];
+    }
+    out[p] = '\0';
+
+    if (vfs_write(argv[1], out, (size_t)p) < 0) {
+        terminal_writestring("\nappend: write failed");
+        return 1;
+    }
+    return 0;
+}
+
+static int prog_chmod(int argc, char* argv[]) {
+    if (argc < 3) {
+        terminal_writestring("\nchmod: usage: chmod <0-7> <path>");
+        return 1;
+    }
+
+    int mode = argv[1][0] - '0';
+    if (argv[1][0] < '0' || argv[1][0] > '7' || argv[1][1] != '\0') {
+        terminal_writestring("\nchmod: invalid mode");
+        return 1;
+    }
+
+    uint16_t perm = 0;
+    if (mode & 4) perm |= VFS_PERM_READ;
+    if (mode & 2) perm |= VFS_PERM_WRITE;
+    if (mode & 1) perm |= VFS_PERM_EXEC;
+
+    if (vfs_chmod(argv[2], perm) < 0) {
+        terminal_writestring("\nchmod: failed");
+        return 1;
+    }
     return 0;
 }
 
@@ -635,6 +927,18 @@ static int prog_exec(int argc, char* argv[]) {
 void shell_register_programs(void) {
     program_register("help",    "show commands",          prog_help);
     program_register("about",   "system information",     prog_about);
+    program_register("fastfetch","quick system summary",  prog_fastfetch);
+    program_register("roadmap", "next-level OS plan",     prog_roadmap);
+    program_register("service", "service manager",         prog_service);
+    program_register("touch",   "create empty file",       prog_touch);
+    program_register("write",   "write text to file",      prog_write);
+    program_register("rm",      "remove file or node",     prog_rm);
+    program_register("mv",      "rename file or node",     prog_mv);
+    program_register("mkdir",   "create directory",         prog_mkdir);
+    program_register("chmod",   "change permissions",       prog_chmod);
+    program_register("stat",    "file metadata",            prog_stat);
+    program_register("cp",      "copy file",                prog_cp);
+    program_register("append",  "append text to file",      prog_append);
     program_register("clear",   "clear terminal",         prog_clear);
     program_register("uname",   "kernel identification",  prog_uname);
     program_register("uptime",  "system uptime",          prog_uptime);
